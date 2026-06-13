@@ -1,0 +1,68 @@
+{
+  "name": "cookd",
+  "version": "0.1.0",
+  "description": "the antisocial network — field reporter CLI for developers who claudemax",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ai",
+    "developer-tools",
+    "cli",
+    "rate-limit",
+    "usage",
+    "anthropic"
+  ],
+  "bugs": {
+    "url": "https://github.com/codeclowns01/cookd/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codeclowns01/cookd.git"
+  },
+  "license": "MIT",
+  "author": "CodeClowns Technologies LLP <info@codeclowns.com>",
+  "type": "module",
+  "bin": {
+    "cookd": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "chalk": "^5.4.0",
+    "chokidar": "^4.0.1",
+    "commander": "^12.1.0",
+    "ink": "^5.1.0",
+    "pino": "^9.0.0",
+    "react": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.7.0",
+    "@types/react": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

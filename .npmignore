@@ -1,0 +1,14 @@
+src/
+test/
+.github/
+coverage/
+*.local
+.env
+.env.*
+tsconfig.json
+vitest.config.ts
+CONTRIBUTING.md
+SECURITY.md
+CODE_OF_CONDUCT.md
+CHANGELOG.md
+.gitignore

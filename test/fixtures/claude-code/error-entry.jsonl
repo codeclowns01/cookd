@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-06-11T10:00:00.000Z","message":{"id":"msg_001","role":"assistant","model":"claude-sonnet-4-6","usage":{"input_tokens":1000,"output_tokens":500,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"type":"system","timestamp":"2026-06-11T10:05:00.000Z","isApiErrorMessage":true,"message":{"role":"system","content":"Claude AI usage limit reached|1781193600","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
