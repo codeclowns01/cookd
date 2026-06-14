@@ -4,8 +4,9 @@ import { hostname } from 'os';
 import { loadCredentials, saveCredentials } from '../auth/credentials.js';
 import { deviceLinkStart, pollForLink, generateDeviceId } from '../auth/device-link.js';
 import { detectAdapter } from '../adapters/registry.js';
+import { ClaudeCodeAdapter } from '../adapters/claude-code/index.js';
 import { computeWindow, WINDOW_MS } from '../adapters/claude-code/window.js';
-import { computeWrapped, computeModelBreakdown, computeDailyStats, computeLifetimeStats } from '../adapters/claude-code/wrapped.js';
+import { computeWrapped, computeModelBreakdown, computeDailyStats, computeLifetimeStats, computeTonight } from '../adapters/claude-code/wrapped.js';
 import { calibrate } from '../adapters/claude-code/calibrate.js';
 import { saveCalibration } from '../adapters/claude-code/calibration-store.js';
 import { syncWindowState, syncLifetimeStats, syncHistoricalStats } from '../sync/client.js';
@@ -94,6 +95,8 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
       setTimeout(onDone, 3000);
       return;
     }
+    const ccAdapter = adapter instanceof ClaudeCodeAdapter ? adapter : null;
+    const sessionStats = ccAdapter?.getSessionStats() ?? { prompts: 0, yoloPrompts: 0, toolCounts: {}, toolErrors: 0 };
 
     if (events.length === 0) {
       setState('no-data');
@@ -156,7 +159,8 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
         plan: null,
         calibrationConfidence: calResult.confidence,
         modelBreakdown: Object.fromEntries(computeModelBreakdown(win.events).map(s => [s.model, s.cpTokens])),
-        dailyStats: computeDailyStats(events, today, calResult.cpLimit ? win.ratio * 100 : 0),
+        dailyStats: computeDailyStats(events, today, calResult.cpLimit ? win.ratio * 100 : 0, sessionStats),
+      tonight: computeTonight(win.events, sessionStats),
       };
       await syncWindowState(creds, summary);
     } catch {
