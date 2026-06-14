@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Not a bug, not a pitch — just a question
+    url: https://github.com/codeclowns01/cookd/discussions
+    about: Use Discussions. Issues are for bugs and adapter pitches only.
+  - name: Everything else
+    url: mailto:info@codeclowns.com
+    about: Email the team directly.
