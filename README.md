@@ -1,5 +1,7 @@
 # cookd
 
+[![npm](https://img.shields.io/npm/v/@codeclowns/cookd)](https://www.npmjs.com/package/@codeclowns/cookd)
+
 **THE ANTISOCIAL NETWORK.**
 
 Claude slammed the door. You have five hours.
