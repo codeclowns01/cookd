@@ -12,3 +12,6 @@ Thumbs.db
 # cookd local state — never commit
 .cookd/
 .gstack/
+
+# AI tooling — internal only
+CLAUDE.md
