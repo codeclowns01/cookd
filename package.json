@@ -23,7 +23,7 @@
   "author": "CodeClowns Technologies LLP <info@codeclowns.com>",
   "type": "module",
   "bin": {
-    "cookd": "./dist/cli.js"
+    "cookd": "dist/cli.js"
   },
   "files": [
     "dist",
