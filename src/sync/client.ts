@@ -2,7 +2,7 @@ import type { Credentials } from '../auth/credentials.js';
 import type { WindowSummary, LifetimeStats, DailyStats } from './events.js';
 import { enqueue, peek, ack, incrementAttempts } from './queue.js';
 
-const API_BASE = process.env.COOKD_API_URL ?? '';
+const API_BASE = process.env.COOKD_API_URL ?? 'https://efocqoekmoiecisrmucn.supabase.co';
 
 export async function syncWindowState(creds: Credentials, summary: WindowSummary): Promise<void> {
   enqueue(summary);

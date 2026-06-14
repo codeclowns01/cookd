@@ -1,5 +1,22 @@
 export type SessionStatus = 'idle' | 'cooking' | 'cookd';
 
+export interface Tonight {
+  prompts?: number;
+  agentRuns?: number;
+  maxContext?: number;
+  outputTokens?: number;
+  cacheReadPct?: number;
+  models?: Record<string, number>;
+  tools?: [string, number][];
+  topProject?: string;
+  topProjectPct?: number;
+  firstPromptAt?: string;
+  timeToCookMins?: number;
+  yoloPct?: number;
+  toolErrors?: number;
+  sessionsCount?: number;
+}
+
 export interface ModelSegment {
   model: string;
   cpTokens: number;
@@ -19,6 +36,18 @@ export interface DailyStats {
   modelBreakdown: Record<string, number>;
   firstSessionAt: number | null;
   lastActivityAt: number | null;
+  prompts?: number;
+  toolCalls?: number;
+  peakHour?: number;
+}
+
+export interface CookedEventPayload {
+  cookedAt: string;
+  usedTokens: number;
+  limitTokens: number;
+  timeToCookMins?: number;
+  topModel?: string;
+  resetsAt?: string;
 }
 
 export interface LifetimeStats {
@@ -46,4 +75,6 @@ export interface WindowSummary {
   calibrationConfidence: string;
   modelBreakdown: Record<string, number>;
   dailyStats: DailyStats;
+  tonight?: Tonight;
+  cookedEvent?: CookedEventPayload;
 }

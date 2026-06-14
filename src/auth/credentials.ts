@@ -9,6 +9,7 @@ export interface Credentials {
   deviceId: string;
   linkedAt: string;
   lastWrappedSync?: string;
+  lastCookedEventSentAt?: string;
 }
 
 const COOKD_DIR = join(homedir(), '.cookd');

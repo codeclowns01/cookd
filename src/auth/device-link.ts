@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 import type { Credentials } from './credentials.js';
 
-const API_BASE = process.env.COOKD_API_URL ?? '';
+const API_BASE = process.env.COOKD_API_URL ?? 'https://efocqoekmoiecisrmucn.supabase.co';
 
 export interface DeviceLinkStartResponse {
   pressCode: string;

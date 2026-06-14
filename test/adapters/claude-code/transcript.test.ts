@@ -22,12 +22,12 @@ function makeEvent(overrides: Partial<UsageEvent> = {}): UsageEvent {
 
 describe('parseJsonl', () => {
   it('returns empty array for empty file', async () => {
-    const events = await parseJsonl(join(fixtures, 'empty.jsonl')).catch(() => []);
+    const { events } = await parseJsonl(join(fixtures, 'empty.jsonl'));
     expect(events).toEqual([]);
   });
 
   it('parses a single valid event', async () => {
-    const events = await parseJsonl(join(fixtures, 'single-event.jsonl'));
+    const { events } = await parseJsonl(join(fixtures, 'single-event.jsonl'));
     expect(events).toHaveLength(1);
     expect(events[0].model).toBe('claude-sonnet-4-6');
     expect(events[0].inputTokens).toBe(1000);
@@ -38,7 +38,7 @@ describe('parseJsonl', () => {
   });
 
   it('parses multiple events in order', async () => {
-    const events = await parseJsonl(join(fixtures, 'multi-event.jsonl'));
+    const { events } = await parseJsonl(join(fixtures, 'multi-event.jsonl'));
     expect(events).toHaveLength(3);
     expect(events[0].ts < events[1].ts).toBe(true);
     expect(events[1].ts < events[2].ts).toBe(true);
@@ -46,13 +46,13 @@ describe('parseJsonl', () => {
   });
 
   it('skips malformed lines and non-assistant entries, returns valid ones', async () => {
-    const events = await parseJsonl(join(fixtures, 'malformed.jsonl'));
+    const { events } = await parseJsonl(join(fixtures, 'malformed.jsonl'));
     expect(events).toHaveLength(1);
     expect(events[0].inputTokens).toBe(100);
   });
 
   it('parses cache tier breakdown into separate fields', async () => {
-    const events = await parseJsonl(join(fixtures, 'cache-tiers.jsonl'));
+    const { events } = await parseJsonl(join(fixtures, 'cache-tiers.jsonl'));
     expect(events).toHaveLength(1);
     expect(events[0].cacheCreationTokens).toBe(300);
     expect(events[0].cacheCreation1hTokens).toBe(200);
@@ -60,13 +60,13 @@ describe('parseJsonl', () => {
   });
 
   it('appends -fast suffix when speed is fast', async () => {
-    const events = await parseJsonl(join(fixtures, 'fast-mode.jsonl'));
+    const { events } = await parseJsonl(join(fixtures, 'fast-mode.jsonl'));
     expect(events).toHaveLength(1);
     expect(events[0].model).toBe('claude-opus-4-8-fast');
   });
 
   it('extracts limitResetAt from error entry and excludes its tokens from CP', async () => {
-    const events = await parseJsonl(join(fixtures, 'error-entry.jsonl'));
+    const { events } = await parseJsonl(join(fixtures, 'error-entry.jsonl'));
     expect(events).toHaveLength(2);
     const errorEvent = events.find(e => e.limitResetAt);
     expect(errorEvent).toBeDefined();
@@ -76,9 +76,24 @@ describe('parseJsonl', () => {
   });
 
   it('parses messageId from message.id', async () => {
-    const events = await parseJsonl(join(fixtures, 'error-entry.jsonl'));
+    const { events } = await parseJsonl(join(fixtures, 'error-entry.jsonl'));
     const normalEvent = events.find(e => !e.limitResetAt);
     expect(normalEvent!.messageId).toBe('msg_001');
+  });
+
+  it('counts prompts, tool calls, tool errors, and yolo mode from session stats', async () => {
+    const { events, sessionStats } = await parseJsonl(join(fixtures, 'session-stats.jsonl'));
+    expect(events).toHaveLength(1);
+    expect(sessionStats.prompts).toBe(3);
+    expect(sessionStats.yoloPrompts).toBe(2);
+    expect(sessionStats.toolCounts).toEqual({ Read: 1, Edit: 1 });
+    expect(sessionStats.toolErrors).toBe(1);
+  });
+
+  it('filters session stats to the specified date', async () => {
+    const { sessionStats } = await parseJsonl(join(fixtures, 'session-stats.jsonl'), '2099-01-01');
+    expect(sessionStats.prompts).toBe(0);
+    expect(sessionStats.toolErrors).toBe(0);
   });
 });
 

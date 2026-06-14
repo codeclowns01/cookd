@@ -1,7 +1,8 @@
 import type { UsageEvent } from '../types.js';
 import { computeWeightedTokens, computeWindow, TOKEN_WEIGHTS, type WindowStats } from './window.js';
 import { formatTokens, formatDuration } from '../../ui/helpers.js';
-import type { ModelSegment, DailyStats, LifetimeStats } from '../../sync/events.js';
+import type { ModelSegment, DailyStats, LifetimeStats, Tonight } from '../../sync/events.js';
+import type { SessionStats } from './transcript.js';
 
 export interface WrappedStats {
   handle: string;
@@ -93,7 +94,7 @@ export function computeModelBreakdown(windowEvents: UsageEvent[]): ModelSegment[
     }));
 }
 
-export function computeDailyStats(allEvents: UsageEvent[], localDate: string, peakPctUsed = 0): DailyStats {
+export function computeDailyStats(allEvents: UsageEvent[], localDate: string, peakPctUsed = 0, sessionStats?: SessionStats): DailyStats {
   const dayEvents = allEvents.filter(e => toLocalDate(e.ts) === localDate);
   const usageEvents = dayEvents.filter(e => !e.limitResetAt);
   const limitHitCount = dayEvents.filter(e => e.limitResetAt).length;
@@ -104,6 +105,7 @@ export function computeDailyStats(allEvents: UsageEvent[], localDate: string, pe
   let cacheCreationTokens = 0;
   let cacheReadTokens = 0;
   const modelBreakdown: Record<string, number> = {};
+  const hourCp = new Map<number, number>();
 
   for (const e of usageEvents) {
     const cp = computeWeightedTokens(e);
@@ -113,11 +115,17 @@ export function computeDailyStats(allEvents: UsageEvent[], localDate: string, pe
     cacheCreationTokens += e.cacheCreationTokens + e.cacheCreation1hTokens;
     cacheReadTokens += e.cacheReadTokens;
     modelBreakdown[e.model] = (modelBreakdown[e.model] ?? 0) + cp;
+    hourCp.set(e.ts.getHours(), (hourCp.get(e.ts.getHours()) ?? 0) + cp);
   }
 
   const timestamps = dayEvents.map(e => e.ts.getTime());
   const firstSessionAt = timestamps.length > 0 ? Math.min(...timestamps) : null;
   const lastActivityAt = timestamps.length > 0 ? Math.max(...timestamps) : null;
+
+  const peakHour = hourCp.size > 0 ? [...hourCp.entries()].sort((a, b) => b[1] - a[1])[0][0] : undefined;
+  const toolCalls = sessionStats
+    ? Object.values(sessionStats.toolCounts).reduce((s, n) => s + n, 0)
+    : undefined;
 
   return {
     localDate,
@@ -132,7 +140,71 @@ export function computeDailyStats(allEvents: UsageEvent[], localDate: string, pe
     modelBreakdown,
     firstSessionAt,
     lastActivityAt,
+    prompts: sessionStats?.prompts,
+    toolCalls,
+    peakHour,
   };
+}
+
+export function computeTonight(windowEvents: UsageEvent[], sessionStats: SessionStats): Tonight {
+  const usageEvents = windowEvents.filter(e => !e.limitResetAt);
+
+  const outputTokens = usageEvents.reduce((s, e) => s + e.outputTokens, 0);
+
+  const sessionIds = new Set(usageEvents.filter(e => e.sessionId).map(e => e.sessionId!));
+  const sessionsCount = sessionIds.size || (usageEvents.length > 0 ? 1 : 0);
+
+  const agentSessionIds = new Set(usageEvents.filter(e => e.isSidechain && e.sessionId).map(e => e.sessionId!));
+  const agentRuns = agentSessionIds.size;
+
+  const maxContext = usageEvents.reduce((m, e) =>
+    Math.max(m, e.inputTokens + e.outputTokens + e.cacheCreationTokens + e.cacheCreation1hTokens + e.cacheReadTokens), 0);
+
+  const totalInput = usageEvents.reduce((s, e) => s + e.inputTokens, 0);
+  const totalCacheRead = usageEvents.reduce((s, e) => s + e.cacheReadTokens, 0);
+  const cacheReadPct = (totalInput + totalCacheRead) > 0
+    ? Math.round(totalCacheRead / (totalInput + totalCacheRead) * 100) : 0;
+
+  const modelCp: Record<string, number> = {};
+  const projectCp: Record<string, number> = {};
+  let totalWindowCp = 0;
+  for (const e of usageEvents) {
+    const cp = computeWeightedTokens(e);
+    totalWindowCp += cp;
+    modelCp[e.model] = (modelCp[e.model] ?? 0) + cp;
+    if (e.projectName) projectCp[e.projectName] = (projectCp[e.projectName] ?? 0) + cp;
+  }
+
+  const projectEntries = Object.entries(projectCp).sort((a, b) => b[1] - a[1]);
+  const topProject = projectEntries[0]?.[0];
+  const topProjectPct = topProject && totalWindowCp > 0
+    ? Math.round(projectCp[topProject] / totalWindowCp * 100) : undefined;
+
+  const sorted = [...usageEvents].sort((a, b) => a.ts.getTime() - b.ts.getTime());
+  const firstPromptAt = sorted[0]?.ts.toISOString();
+
+  const rlEvent = windowEvents.find(e => e.limitResetAt);
+  const timeToCookMins = rlEvent && sorted[0]
+    ? Math.round((rlEvent.ts.getTime() - sorted[0].ts.getTime()) / 60000) : undefined;
+
+  const { prompts, yoloPrompts, toolCounts, toolErrors } = sessionStats;
+  const yoloPct = prompts > 0 ? Math.round(yoloPrompts / prompts * 100) : 0;
+  const tools = Object.entries(toolCounts).sort((a, b) => b[1] - a[1]).slice(0, 10) as [string, number][];
+
+  const tonight: Tonight = { yoloPct, cacheReadPct };
+  if (outputTokens > 0) tonight.outputTokens = outputTokens;
+  if (sessionsCount > 0) tonight.sessionsCount = sessionsCount;
+  if (agentRuns > 0) tonight.agentRuns = agentRuns;
+  if (maxContext > 0) tonight.maxContext = maxContext;
+  if (Object.keys(modelCp).length > 0) tonight.models = modelCp;
+  if (tools.length > 0) tonight.tools = tools;
+  if (topProject) { tonight.topProject = topProject; tonight.topProjectPct = topProjectPct; }
+  if (firstPromptAt) tonight.firstPromptAt = firstPromptAt;
+  if (timeToCookMins !== undefined) tonight.timeToCookMins = timeToCookMins;
+  if (prompts > 0) tonight.prompts = prompts;
+  if (toolErrors > 0) tonight.toolErrors = toolErrors;
+
+  return tonight;
 }
 
 export function computeLifetimeStats(allEvents: UsageEvent[]): LifetimeStats {

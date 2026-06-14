@@ -1,12 +1,13 @@
 import chalk from 'chalk';
 import { loadCredentials, saveCredentials } from '../auth/credentials.js';
 import { detectAdapter } from '../adapters/registry.js';
+import { ClaudeCodeAdapter } from '../adapters/claude-code/index.js';
 import { computeWindow, WINDOW_MS } from '../adapters/claude-code/window.js';
 import { calibrate, extractLatestResetTime } from '../adapters/claude-code/calibrate.js';
-import { computeModelBreakdown, computeDailyStats, computeLifetimeStats } from '../adapters/claude-code/wrapped.js';
+import { computeModelBreakdown, computeDailyStats, computeLifetimeStats, computeTonight } from '../adapters/claude-code/wrapped.js';
 import { loadCalibration, saveCalibration, isStale } from '../adapters/claude-code/calibration-store.js';
 import { syncWindowState, syncLifetimeStats } from '../sync/client.js';
-import type { WindowSummary, SessionStatus } from '../sync/events.js';
+import type { WindowSummary, SessionStatus, CookedEventPayload } from '../sync/events.js';
 import type { UsageEvent } from '../adapters/types.js';
 import { STAMP, MUT, FAINT } from '../ui/theme.js';
 
@@ -25,17 +26,20 @@ function isOlderThan7Days(isoString: string): boolean {
 }
 
 export async function runWatch(): Promise<void> {
-  const creds = await loadCredentials();
+  let creds = await loadCredentials();
   if (!creds) {
     console.log(chalk.hex(FAINT)('not linked. run: npx cookd init'));
     process.exit(1);
   }
+  let lastCookedEventSentAt = creds.lastCookedEventSentAt ?? null;
 
   const adapter = await detectAdapter();
   if (!adapter) {
     console.log(chalk.hex(FAINT)('no agent detected.'));
     process.exit(1);
   }
+
+  const ccAdapter = adapter instanceof ClaudeCodeAdapter ? adapter : null;
 
   const initialEvents = await adapter.events();
   const stored = loadCalibration();
@@ -78,6 +82,8 @@ export async function runWatch(): Promise<void> {
     const resetsAt = resetFromError?.toISOString()
       ?? (oldestWindowEvent ? new Date(oldestWindowEvent.ts.getTime() + WINDOW_MS).toISOString() : null);
 
+    const sessionStats = ccAdapter?.getSessionStats() ?? { prompts: 0, yoloPrompts: 0, toolCounts: {}, toolErrors: 0 };
+
     const summary: WindowSummary = {
       status: deriveStatus(window.ratio, limit),
       usedTokens: window.weightedTokens,
@@ -88,10 +94,32 @@ export async function runWatch(): Promise<void> {
       plan: null,
       calibrationConfidence: calState?.confidence ?? 'none',
       modelBreakdown: Object.fromEntries(computeModelBreakdown(window.events).map(s => [s.model, s.cpTokens])),
-      dailyStats: computeDailyStats(events, toLocalDate(new Date()), limit != null ? window.ratio * 100 : 0),
+      dailyStats: computeDailyStats(events, toLocalDate(new Date()), limit != null ? window.ratio * 100 : 0, sessionStats),
+      tonight: computeTonight(window.events, sessionStats),
     };
 
-    await syncWindowState(creds!, summary);
+    let cookedEventPayload: CookedEventPayload | undefined;
+    if (summary.status === 'cookd' && resetsAt && resetsAt !== lastCookedEventSentAt) {
+      const rlEvent = events.find(e => e.limitResetAt);
+      const topModel = Object.entries(summary.modelBreakdown).sort((a, b) => b[1] - a[1])[0]?.[0];
+      cookedEventPayload = {
+        cookedAt: rlEvent?.ts.toISOString() ?? resetsAt,
+        usedTokens: summary.usedTokens,
+        limitTokens: summary.limitTokens ?? 0,
+        timeToCookMins: summary.tonight?.timeToCookMins,
+        topModel,
+        resetsAt,
+      };
+    }
+
+    await syncWindowState(creds!, cookedEventPayload ? { ...summary, cookedEvent: cookedEventPayload } : summary);
+
+    if (cookedEventPayload && resetsAt) {
+      lastCookedEventSentAt = resetsAt;
+      creds = { ...creds!, lastCookedEventSentAt: resetsAt };
+      await saveCredentials(creds);
+    }
+
     lastSyncedPct = newPct;
     lastSyncTime = Date.now();
   }

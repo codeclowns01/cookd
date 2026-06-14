@@ -2,6 +2,13 @@ import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import type { UsageEvent } from '../types.js';
 
+export interface SessionStats {
+  prompts: number;
+  yoloPrompts: number;
+  toolCounts: Record<string, number>;
+  toolErrors: number;
+}
+
 interface RawCacheCreation {
   ephemeral_5m_input_tokens?: number;
   ephemeral_1h_input_tokens?: number;
@@ -31,6 +38,7 @@ interface RawEntry {
   requestId?: string;
   isSidechain?: boolean;
   isApiErrorMessage?: boolean;
+  permissionMode?: string;
 }
 
 function extractText(content: unknown): string | null {
@@ -101,14 +109,7 @@ function extractResetTime(entry: RawEntry): Date | null {
   return null;
 }
 
-function parseEntry(line: string): UsageEvent | null {
-  let entry: RawEntry;
-  try {
-    entry = JSON.parse(line) as RawEntry;
-  } catch {
-    return null;
-  }
-
+function parseEntry(entry: RawEntry): UsageEvent | null {
   const isErrorEntry = entry.isApiErrorMessage === true;
   const isAssistant = entry.type === 'assistant' || entry.message?.role === 'assistant';
 
@@ -193,8 +194,14 @@ export function deduplicateEvents(events: UsageEvent[]): UsageEvent[] {
   return [...byMessageId.values(), ...noId];
 }
 
-export async function parseJsonl(filePath: string): Promise<UsageEvent[]> {
+export async function parseJsonl(
+  filePath: string,
+  statsDate?: string,
+): Promise<{ events: UsageEvent[]; sessionStats: SessionStats }> {
   const events: UsageEvent[] = [];
+  const sessionStats: SessionStats = { prompts: 0, yoloPrompts: 0, toolCounts: {}, toolErrors: 0 };
+  let inYolo = false;
+
   const rl = createInterface({
     input: createReadStream(filePath, { encoding: 'utf8' }),
     crlfDelay: Infinity,
@@ -203,9 +210,49 @@ export async function parseJsonl(filePath: string): Promise<UsageEvent[]> {
   for await (const line of rl) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const event = parseEntry(trimmed);
+
+    let entry: RawEntry;
+    try { entry = JSON.parse(trimmed) as RawEntry; } catch { continue; }
+
+    const event = parseEntry(entry);
     if (event) events.push(event);
+
+    const entryDate = entry.timestamp
+      ? new Date(entry.timestamp).toLocaleDateString('en-CA')
+      : null;
+    const countEntry = !statsDate || entryDate === statsDate;
+
+    if (entry.type === 'permission-mode') {
+      inYolo = entry.permissionMode === 'bypassPermissions';
+    } else if (entry.type === 'user' && countEntry) {
+      const content = entry.message?.content;
+      if (typeof content === 'string' && content.trim().length > 0) {
+        sessionStats.prompts++;
+        if (inYolo) sessionStats.yoloPrompts++;
+      } else if (Array.isArray(content)) {
+        for (const item of content as unknown[]) {
+          if (item && typeof item === 'object') {
+            const i = item as Record<string, unknown>;
+            if (i.type === 'tool_result' && i.is_error === true) {
+              sessionStats.toolErrors++;
+            }
+          }
+        }
+      }
+    } else if (entry.type === 'assistant' && countEntry) {
+      const content = entry.message?.content;
+      if (Array.isArray(content)) {
+        for (const item of content as unknown[]) {
+          if (item && typeof item === 'object') {
+            const i = item as Record<string, unknown>;
+            if (i.type === 'tool_use' && typeof i.name === 'string') {
+              sessionStats.toolCounts[i.name] = (sessionStats.toolCounts[i.name] ?? 0) + 1;
+            }
+          }
+        }
+      }
+    }
   }
 
-  return events;
+  return { events, sessionStats };
 }
