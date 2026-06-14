@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tonight's Anatomy — per-session stats derived without reading prompts: prompt count, YOLO-mode percentage, tool usage breakdown, agent runs, max context, cache read rate, first-prompt timestamp, time-to-cook
 - Write-ahead SQLite queue (`~/.cookd/local.db`) for reliable sync with automatic retry
 - `AgentAdapter` interface — open contract for community-contributed agent support
-- Zero-config install — `npx cookd init` works out of the box with no `.env` file required
+- Zero-config install — `npx @codeclowns/cookd init` works out of the box with no `.env` file required
 
 [Unreleased]: https://github.com/codeclowns01/cookd/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/codeclowns01/cookd/releases/tag/v0.1.0

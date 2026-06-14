@@ -28,7 +28,7 @@ function isOlderThan7Days(isoString: string): boolean {
 export async function runWatch(): Promise<void> {
   let creds = await loadCredentials();
   if (!creds) {
-    console.log(chalk.hex(FAINT)('not linked. run: npx cookd init'));
+    console.log(chalk.hex(FAINT)('not linked. run: npx @codeclowns/cookd init'));
     process.exit(1);
   }
   let lastCookedEventSentAt = creds.lastCookedEventSentAt ?? null;
