@@ -53,7 +53,7 @@ The Claude Code adapter at `src/adapters/claude-code/` is the reference implemen
 - `detect()` must never throw. If the data directory doesn't exist, return `false`.
 - `events()` reads local files only. No network calls from an adapter.
 - `watch()` uses `chokidar`. Return the cleanup function. Do not leak watchers.
-- Adapters read token counts only. If the agent's format includes prompt content, extract only the numeric fields.
+- Adapters extract token counts, timestamps, model identifiers, tool function names, and boolean flags. If the agent's format includes prompt content, tool arguments, generated text, or file paths — skip them. The companion transmits the same data contract from all adapters; an adapter that transmits more than this list will not be merged.
 
 ---
 
@@ -115,7 +115,7 @@ Use the issue templates in `.github/ISSUE_TEMPLATE/`. Give specific details. Vag
 
 ## what we will not merge
 
-- Changes that read prompt content, file paths, or code from agent transcripts
+- Changes that read prompt content, tool arguments, file paths, or code from agent transcripts
 - Network calls from inside adapters
 - Dependencies that don't run on Node 22 LTS
 - Features that belong in the app, not the companion
