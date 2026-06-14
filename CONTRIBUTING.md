@@ -26,8 +26,15 @@ export interface UsageEvent {
   model: string;
   inputTokens: number;
   outputTokens: number;
-  cacheCreationTokens: number;
+  cacheCreationTokens: number;    // 5-minute ephemeral cache write tokens
+  cacheCreation1hTokens: number;  // 1-hour ephemeral cache write tokens
   cacheReadTokens: number;
+  isSidechain: boolean;           // true if this is an agent/subagent turn
+  messageId?: string;             // opaque dedup key from the agent
+  sessionId?: string;             // groups events within one agent session
+  projectName?: string;           // directory basename of the project, never full path
+  limitResetAt?: Date;            // set on rate-limit error entries; token fields are 0
+  requestId?: string;
 }
 ```
 

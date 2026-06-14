@@ -43,9 +43,11 @@ cookd wrapped        # your full usage anatomy
 
 **your code and prompts never leave your machine. we take the numbers.**
 
-The Claude Code adapter reads only token counts from your local JSONL transcripts — `inputTokens`, `outputTokens`, `cacheCreationTokens`, `cacheReadTokens`. It does not read prompt content. It does not read code. It does not read file paths. It does not read project names.
+The Claude Code adapter extracts only non-content fields from your local JSONL transcripts: token counts, timestamps, boolean flags, tool names (system identifiers like `"Read"`, `"Edit"`), and the rate-limit reset timestamp. It does not read prompt content. It does not read code. It does not read file paths.
 
-Credentials are stored at `~/.cookd/credentials.json` with `chmod 600`. Nothing is logged to any external service beyond the numeric usage data you explicitly sync.
+The Tonight's Anatomy feature also reads the directory basename of your project (e.g., `cookd`) and tracks which tools you used by name — never the arguments passed to them.
+
+Credentials are stored at `~/.cookd/credentials.json` with `chmod 600`. The full list of what leaves your machine is in `src/sync/events.ts` and `src/adapters/claude-code/transcript.ts`.
 
 This is open source. You can read exactly what leaves your machine. That is the point.
 
