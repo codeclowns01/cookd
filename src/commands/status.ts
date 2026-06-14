@@ -12,7 +12,7 @@ const W = 46;
 export async function runStatus(): Promise<void> {
   const creds = await loadCredentials();
   if (!creds) {
-    console.log(chalk.hex(FAINT)('not linked. run: npx cookd init'));
+    console.log(chalk.hex(FAINT)('not linked. run: npx @codeclowns/cookd init'));
     return;
   }
 

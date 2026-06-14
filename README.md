@@ -17,14 +17,14 @@ You share it wherever your developer community lives. Someone who receives it wa
 cookd exists because the rate-limit wall gives you nothing when it hits. Just a timestamp and five hours of ceiling. This fills that gap — with numbers, with context, and with something shareable when you'd rather laugh about it than stare at the ceiling.
 
 ```
-npx cookd init
+npx @codeclowns/cookd init
 ```
 
 ---
 
 ## what happens
 
-You run `npx cookd init`. The companion reads your local Claude Code transcripts — token counts only, never content. It prints your field notes: how many tokens you torched, how fast you burned, what percentage of your window is gone. Then it generates a six-character press code.
+You run `npx @codeclowns/cookd init`. The companion reads your local Claude Code transcripts — token counts only, never content. It prints your field notes: how many tokens you torched, how fast you burned, what percentage of your window is gone. Then it generates a six-character press code.
 
 You enter the press code in the app. The editor reads your file. A roast card prints. It is specific. It uses your real numbers. It is, depending on your crimes, somewhere between funny and deeply accurate.
 
@@ -35,7 +35,7 @@ You share it wherever your developer community lives. Someone who receives it wa
 ## the companion commands
 
 ```bash
-npx cookd init       # link this machine to your account
+npx @codeclowns/cookd init       # link this machine to your account
 cookd status         # how deep are you right now
 cookd watch          # start the background sync
 cookd wrapped        # your full usage anatomy
@@ -88,10 +88,10 @@ Node 22+. A terminal. A Claude Code session history. That last one is the only r
 
 ```bash
 # one-time setup
-npx cookd init
+npx @codeclowns/cookd init
 
 # global install (for status / watch / wrapped without npx)
-npm install -g cookd
+npm install -g @codeclowns/cookd
 ```
 
 ---

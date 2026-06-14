@@ -1,5 +1,5 @@
 {
-  "name": "cookd",
+  "name": "@codeclowns/cookd",
   "version": "0.1.0",
   "description": "the antisocial network — field reporter CLI for developers who claudemax",
   "keywords": [
