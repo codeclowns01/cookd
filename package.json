@@ -1,6 +1,6 @@
 {
   "name": "@codeclowns/cookd",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "the antisocial network — field reporter CLI for developers who claudemax",
   "keywords": [
     "claude",
@@ -41,7 +41,7 @@
     "clean": "rm -rf dist"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^22.7.0",
+    "@types/node": "^20.0.0",
     "@types/react": "^18.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",

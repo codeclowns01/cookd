@@ -194,7 +194,7 @@ export function deduplicateEvents(events: UsageEvent[]): UsageEvent[] {
   return [...byMessageId.values(), ...noId];
 }
 
-export async function parseJsonl(
+async function parseJsonlOnce(
   filePath: string,
   statsDate?: string,
 ): Promise<{ events: UsageEvent[]; sessionStats: SessionStats }> {
@@ -255,4 +255,26 @@ export async function parseJsonl(
   }
 
   return { events, sessionStats };
+}
+
+export async function parseJsonl(
+  filePath: string,
+  statsDate?: string,
+): Promise<{ events: UsageEvent[]; sessionStats: SessionStats }> {
+  const maxAttempts = process.platform === 'win32' ? 3 : 1;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) await new Promise<void>(r => setTimeout(r, 200 * attempt));
+    try {
+      return await parseJsonlOnce(filePath, statsDate);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === 'EIO' || code === 'EBUSY' || code === 'EPERM') {
+        lastError = e;
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError ?? new Error('parseJsonl: failed after retries');
 }
