@@ -41,7 +41,27 @@ npx @codeclowns/cookd init       # link this machine to your account
 cookd status         # how deep are you right now
 cookd watch          # start the background sync
 cookd wrapped        # your full usage anatomy
+cookd uninstall      # turn off auto-sync (remove the hooks + binary)
 ```
+
+---
+
+## auto-sync
+
+After you link, cookd offers to keep your stats fresh automatically. Say yes and it adds two hooks to your Claude Code settings (`~/.claude/settings.json`) that run a one-shot sync whenever a Claude session starts or ends — so the app reflects your usage without you re-running anything.
+
+What consent installs, exactly:
+
+- **Two hooks** — `SessionStart` and `SessionEnd` — each running `cookd sync` in the background (30s cap). cookd **backs up your settings first and only adds** — it never overwrites what's already there.
+- **A ~60MB helper binary**, downloaded once to `~/.cookd/bin/` and checksum-verified against the release's `SHA256SUMS`. The hooks call this local binary directly (never `npx`), so they run fast and offline.
+
+`cookd sync` reads only the same structural stats as every other sync (see below) — never your prompts, code, or files. Turn it off anytime:
+
+```bash
+cookd uninstall      # removes the hooks and the binary; your account is untouched
+```
+
+If you decline, nothing is installed — re-run `npx @codeclowns/cookd` whenever you want to refresh (an already-linked machine syncs silently, no new press code). Auto-sync ships from the release that introduces it; on older versions the offer degrades to "re-run to refresh."
 
 ---
 
