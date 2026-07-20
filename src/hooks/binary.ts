@@ -3,6 +3,7 @@ import { homedir } from 'os';
 import { mkdirSync, writeFileSync, chmodSync, renameSync, existsSync } from 'fs';
 import { releaseAssetName } from './platform.js';
 import { parseSums, verifyChecksum } from './checksum.js';
+import { safeFetch } from '../sync/client.js';
 
 const RELEASE_BASE =
   process.env.COOKD_RELEASE_BASE ?? 'https://github.com/codeclowns01/cookd/releases/download';
@@ -40,9 +41,11 @@ export async function downloadBinary(version: string): Promise<void> {
   if (!asset) {
     throw new BinaryInstallError(`no prebuilt cookd binary for ${process.platform}/${process.arch}`);
   }
+  // safeFetch reuses the proxy/TLS-inspection error handling from the sync client,
+  // so corporate-network users get an actionable message on the ~60MB download too.
   const [binRes, sumsRes] = await Promise.all([
-    fetch(assetUrl(RELEASE_BASE, version, asset)),
-    fetch(sumsUrl(RELEASE_BASE, version)),
+    safeFetch(assetUrl(RELEASE_BASE, version, asset)),
+    safeFetch(sumsUrl(RELEASE_BASE, version)),
   ]);
   if (!binRes.ok) throw new BinaryInstallError(`download failed: ${binRes.status}`);
   if (!sumsRes.ok) throw new BinaryInstallError(`checksums fetch failed: ${sumsRes.status}`);
