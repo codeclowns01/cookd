@@ -1,6 +1,6 @@
 # ADR-011: Auto-refresh the companion via a consented Claude Code SessionEnd hook running a downloaded local binary
 
-- **Status**: Accepted
+- **Status**: Implemented with deviations
 - **Date**: 2026-07-20
 - **Source manifest**: docs/architecture/manifests/companion-refresh-hook-scope-manifest.md
 - **Deciders**: Chief Architect (automated pre-development review) + founder (Kanwar)
@@ -93,3 +93,18 @@ Ship a companion-only auto-refresh built from five parts:
 ## Next Step
 
 This ADR is a design decision, not an implementation plan. Next: write an implementation plan against it, then `/plan-eng-review` and `/plan-design-review`.
+
+## Conformance Check
+
+**2026-07-21** — `/chief-architect-verify` on branch `feat/companion-refresh-hook` (impl commits `b127b35` + `f98d6f3`). 92 tests pass, `tsc --noEmit` clean.
+
+**Score: 13/16 checkable claims fully implemented (~81%). No Core-Wedge claim missing. Verdict: 🟡 Implemented with deviations.**
+
+Implemented as decided (✅): AC1 (`cookd sync` reuses `syncWindowState`/`sync_queue`, no new POST — `run.ts:77`), AC2 (checksum-verified binary → `~/.cookd/bin`, graceful deferral — `binary.ts`, `init.tsx offerAutoSync`), AC4 (`uninstall` removes only cookd's block+binary by command-path), AC5 (re-init guard — `init-guard.ts` + both `init.tsx` paths), AC7 (npm `files` still `dist`-only), AC8 (**exceeded** — both `SessionStart`+`SessionEnd` installed, so R1 closed not merely deferred), eng deltas D1–D4, design deltas DD1/DD3/DD4.
+
+Deviations (for conscious accept or follow-up):
+- **🔻 Binary download uses raw `fetch`, not `safeFetch` (unstated).** `binary.ts:44-45`. `safeFetch` (proxy/TLS-inspection handling, `client.ts:7`) is not exported and was not reused — corporate-proxy users may get an unhelpful error on the ~60MB download. Recommended fix before merge: export `safeFetch`/shared util and use it.
+- **🔻 Managed-policy not detected (AC3, unstated).** `settings.ts` has no `allowManagedHooksOnly`/`disableAllHooks` check; the write mechanics (backup + add-only merge + atomic + unparseable-abort) are fully implemented, but an enterprise-blocked hook installs silently and never fires. Implement detection or explicitly defer.
+- **⚠️ Consent renders via chalk, not Ink `Box` chrome (AC6/DD2, reason stated).** Both flows unified and `useInput` risk avoided; theme colors (`consentColorFor`) + legible-edit treatment + plain-TTY fallback + non-interactive-no-install (tested) all preserved; only the box framing was dropped.
+
+This ADR is the living record: `/chief-architect-verify` sets Status → Implemented with deviations.
