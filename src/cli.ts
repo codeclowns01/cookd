@@ -44,7 +44,7 @@ program
   .description('link this machine to your cookd account')
   .action(async () => {
     const { runInit } = await import('./commands/init.js');
-    await runInit();
+    await runInit(pkg.version);
   });
 
 program
@@ -69,6 +69,22 @@ program
   .action(async () => {
     const { runWrapped } = await import('./commands/wrapped.js');
     await runWrapped();
+  });
+
+program
+  .command('sync')
+  .description('one-shot usage sync (used by the auto-sync hook)')
+  .action(async () => {
+    const { runSync } = await import('./commands/sync.js');
+    await runSync();
+  });
+
+program
+  .command('uninstall')
+  .description('turn off auto-sync (remove the hooks + local binary)')
+  .action(async () => {
+    const { runUninstall } = await import('./commands/uninstall.js');
+    await runUninstall();
   });
 
 program.parseAsync(process.argv).catch(err => {
