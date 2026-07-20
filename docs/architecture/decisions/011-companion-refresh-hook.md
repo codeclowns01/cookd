@@ -1,6 +1,6 @@
 # ADR-011: Auto-refresh the companion via a consented Claude Code SessionEnd hook running a downloaded local binary
 
-- **Status**: Implemented with deviations
+- **Status**: Implemented
 - **Date**: 2026-07-20
 - **Source manifest**: docs/architecture/manifests/companion-refresh-hook-scope-manifest.md
 - **Deciders**: Chief Architect (automated pre-development review) + founder (Kanwar)
@@ -108,3 +108,12 @@ Deviations (for conscious accept or follow-up):
 - **⚠️ Consent renders via chalk, not Ink `Box` chrome (AC6/DD2, reason stated).** Both flows unified and `useInput` risk avoided; theme colors (`consentColorFor`) + legible-edit treatment + plain-TTY fallback + non-interactive-no-install (tested) all preserved; only the box framing was dropped.
 
 This ADR is the living record: `/chief-architect-verify` sets Status → Implemented with deviations.
+
+**2026-07-21 (re-verify)** — `/chief-architect-verify` re-run after the deviations were resolved. **Score: 16/16 in-scope claims implemented. Verdict: 🟢 — safe to merge (architecture conformance).** Status flipped → **Implemented**.
+
+Disposition of the three prior deviations:
+- **`safeFetch` for the binary download — FIXED** (`87da72a`). `safeFetch` exported from `client.ts:7`; `binary.ts:47-48` uses it, so the ~60MB download shares the sync client's proxy/TLS-inspection error handling.
+- **Managed-policy / enterprise-block detection — CONSCIOUSLY DESCOPED** (founder, 2026-07-21). Out of scope for now; enterprise managed-hook environments are not a target audience yet. The `settings.json` write mechanics (backup + add-only merge + atomic + unparseable-abort) remain fully implemented. Revisit if/when enterprise becomes a target.
+- **Consent renders via chalk-colored terminal lines, not Ink `Box` chrome — INTENDED DESIGN** (founder, 2026-07-21). The thin terminal look is what the founder wants kept. AC6 is satisfied: theme tokens (`consentColorFor` → STAMP/MUT/FAINT), plain-TTY fallback, and non-interactive-no-install (tested) are all in place; the box-framing expectation from DD2 is retired by decision.
+
+No unstated divergence remains. Still-open items are pre-existing and unrelated to this ADR: `topProject` folder-name leak (ADR-010) and `demo-usage-sim` drift.
