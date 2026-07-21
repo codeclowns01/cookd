@@ -20,8 +20,14 @@ import { HeatGauge } from '../ui/ink/HeatGauge.js';
 import { PressCode } from '../ui/ink/PressCode.js';
 import { Barcode } from '../ui/ink/Barcode.js';
 import chalk from 'chalk';
+import { createInterface } from 'readline';
 import { STAMP, MUT, FLAME, FAINT } from '../ui/theme.js';
 import { formatTokens, formatDuration } from '../ui/helpers.js';
+import { shouldSkipPressCode } from './init-guard.js';
+import { runSyncOnce } from '../sync/run.js';
+import { installAutoSync } from '../hooks/install.js';
+import { binaryPath } from '../hooks/binary.js';
+import { consentLines, consentColorFor } from '../ui/ink/Consent.js';
 
 async function syncAfterLink(
   creds: Credentials,
@@ -88,6 +94,7 @@ type InitState =
   | 'press-code'
   | 'expired'
   | 'success'
+  | 'resync'
   | 'already-linked';
 
 function spinnerFrame(tick: number): string {
@@ -96,7 +103,7 @@ function spinnerFrame(tick: number): string {
 }
 
 interface InitAppProps {
-  onDone: () => void;
+  onDone: (outcome: 'linked' | 'other') => void;
 }
 
 function InitApp({ onDone }: InitAppProps): React.ReactElement {
@@ -136,10 +143,18 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
 
     const existing = await loadCredentials();
 
+    // Re-init guard: an already-linked device just re-syncs silently, no press code.
+    if (shouldSkipPressCode(existing)) {
+      setState('resync');
+      try { await runSyncOnce(existing!); } catch { /* non-fatal — queued, retries next sync */ }
+      setTimeout(() => onDone('other'), 1500);
+      return;
+    }
+
     const adapter = await detectAdapter();
     if (!adapter) {
       setState('no-data');
-      setTimeout(onDone, 3000);
+      setTimeout(() => onDone('other'), 3000);
       return;
     }
 
@@ -149,7 +164,7 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
       events = await adapter.events();
     } catch {
       setState('network-error');
-      setTimeout(onDone, 3000);
+      setTimeout(() => onDone('other'), 3000);
       return;
     }
     const ccAdapter = adapter instanceof ClaudeCodeAdapter ? adapter : null;
@@ -157,7 +172,7 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
 
     if (events.length === 0) {
       setState('no-data');
-      setTimeout(onDone, 3000);
+      setTimeout(() => onDone('other'), 3000);
       return;
     }
 
@@ -180,7 +195,7 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'unknown error');
       setState('network-error');
-      setTimeout(onDone, 5000);
+      setTimeout(() => onDone('other'), 5000);
       return;
     }
 
@@ -191,7 +206,7 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
     const creds = await pollForLink(deviceId, linkSession.sessionId, () => {}, existing?.deviceToken);
     if (!creds) {
       setState('expired');
-      setTimeout(onDone, 3000);
+      setTimeout(() => onDone('other'), 3000);
       return;
     }
 
@@ -203,7 +218,7 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
     setLinkedHandle(creds.handle);
     setLinkedDeviceId(creds.deviceId);
     setState('success');
-    setTimeout(onDone, 5000);
+    setTimeout(() => onDone('linked'), 3000);
   }
 
   const ratio = wrapped?.window.ratio ?? 0;
@@ -300,6 +315,13 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
         </>
       )}
 
+      {state === 'resync' && (
+        <>
+          <Text>{'  ' + chalk.hex(FAINT)(spinnerFrame(tick) + '  re-syncing your latest usage…')}</Text>
+          <Text>{'  ' + chalk.hex(MUT).italic('— already linked. nothing else to do.')}</Text>
+        </>
+      )}
+
       {state === 'already-linked' && (
         <>
           <Text>{'  ' + chalk.hex(STAMP).bold(`@${linkedHandle.toUpperCase()} already on record.`)}</Text>
@@ -326,7 +348,51 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
   );
 }
 
-async function runInitPlain(): Promise<void> {
+function humaneAutoSyncError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/no prebuilt/i.test(msg)) return 'auto-sync isn’t available for your platform yet — re-run cookd anytime.';
+  if (/download failed|checksums fetch failed|fetch failed|ENOTFOUND|ETIMEDOUT|ECONNREFUSED/i.test(msg))
+    return 'couldn’t reach the download server — auto-sync will finish next time you run cookd.';
+  if (/not valid JSON/i.test(msg)) return 'your ~/.claude/settings.json isn’t valid JSON — fix it, then re-run cookd.';
+  if (/allowManagedHooks|disableAllHooks|managed/i.test(msg)) return 'your organization blocks Claude hooks — auto-sync isn’t available here.';
+  return 'auto-sync setup skipped - re-run cookd anytime to finish.';
+}
+
+async function askYesNoDefaultYes(): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await new Promise<string>(resolve => rl.question('', resolve));
+    return !/^\s*n/i.test(answer);
+  } finally {
+    rl.close();
+  }
+}
+
+/** Offer to install auto-sync (consented). Shown after a first link, in both the Ink
+ *  and plain flows. Non-interactive contexts never install. */
+export async function offerAutoSync(version: string, p: (s: string) => void): Promise<void> {
+  if (!process.stdin.isTTY) {
+    p(chalk.hex(FAINT)('  auto-sync off — re-run cookd anytime to refresh.'));
+    return;
+  }
+  p('');
+  consentLines(binaryPath()).forEach((line, i) => p('  ' + chalk.hex(consentColorFor(line, i))(line)));
+  p('');
+  p('  ' + chalk.hex(FLAME).bold('add this line? [Y/n]'));
+  if (!(await askYesNoDefaultYes())) {
+    p(chalk.hex(FAINT)('  auto-sync off — re-run cookd anytime to refresh.'));
+    return;
+  }
+  p(chalk.hex(FAINT)('  setting up auto-sync…'));
+  try {
+    await installAutoSync(version);
+    p(chalk.green.bold('  auto-sync on.') + chalk.hex(FAINT)(' stats now refresh at every Claude session.'));
+  } catch (e) {
+    p(chalk.hex(FLAME)('  ' + humaneAutoSyncError(e)));
+  }
+}
+
+async function runInitPlain(version: string): Promise<void> {
   const p = (msg: string) => process.stdout.write(msg + '\n');
 
   p('');
@@ -334,6 +400,15 @@ async function runInitPlain(): Promise<void> {
   p(chalk.hex(FAINT)('  reading your field notes…'));
 
   const existing = await loadCredentials();
+
+  // Re-init guard: already-linked device re-syncs silently, no press code.
+  if (shouldSkipPressCode(existing)) {
+    p(chalk.hex(FAINT)('  re-syncing your latest usage…'));
+    try { await runSyncOnce(existing!); p(chalk.green.bold('  synced.')); }
+    catch { p(chalk.hex(FAINT)('  sync failed — try again in a moment.')); }
+    return;
+  }
+
   const adapter = await detectAdapter();
   if (!adapter) {
     p(chalk.hex(FAINT)('  no claude code session history found.'));
@@ -402,21 +477,26 @@ async function runInitPlain(): Promise<void> {
 
   const today = new Date().toLocaleDateString('en-CA');
   await syncAfterLink(creds, events, calResult, today, sessionStats);
+
+  await offerAutoSync(version, p);
 }
 
-export async function runInit(): Promise<void> {
+export async function runInit(version: string): Promise<void> {
   if (!process.stdout.isTTY) {
-    await runInitPlain();
+    await runInitPlain(version);
     return;
   }
   try {
-    await new Promise<void>(resolve => {
-      const { unmount } = render(<InitApp onDone={() => { unmount(); resolve(); }} />);
+    const outcome = await new Promise<'linked' | 'other'>(resolve => {
+      const { unmount } = render(<InitApp onDone={(o) => { unmount(); resolve(o); }} />);
     });
+    if (outcome === 'linked') {
+      await offerAutoSync(version, (s) => process.stdout.write(s + '\n'));
+    }
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === 'EIO' || code === 'EBUSY' || code === 'EPERM') {
-      await runInitPlain();
+      await runInitPlain(version);
     } else {
       throw e;
     }

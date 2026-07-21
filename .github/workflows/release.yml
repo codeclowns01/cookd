@@ -108,8 +108,16 @@ jobs:
           path: binaries/
           merge-multiple: true
 
+      - name: generate checksums
+        run: |
+          cd binaries
+          sha256sum cookd-* > SHA256SUMS
+          cat SHA256SUMS
+
       - name: create release
         uses: softprops/action-gh-release@v2
         with:
-          files: binaries/*
+          files: |
+            binaries/cookd-*
+            binaries/SHA256SUMS
           generate_release_notes: true

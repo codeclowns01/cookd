@@ -4,7 +4,7 @@ import { enqueue, peek, ack, incrementAttempts } from './queue.js';
 
 const API_BASE = process.env.COOKD_API_URL ?? 'https://efocqoekmoiecisrmucn.supabase.co';
 
-async function safeFetch(url: string, options: RequestInit): Promise<Response> {
+export async function safeFetch(url: string, options: RequestInit = {}): Promise<Response> {
   try {
     return await fetch(url, options);
   } catch (e) {

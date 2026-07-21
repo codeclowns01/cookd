@@ -129,6 +129,18 @@ A `dailyStats` object (same shape as the sync table above) for each calendar dat
 
 ---
 
+## What the companion writes and installs (auto-sync, opt-in)
+
+Auto-sync is off until you explicitly consent during `init`. If you accept, the companion makes two local changes (and nothing on your account):
+
+**Edits `~/.claude/settings.json`** — adds two hooks (`SessionStart`, `SessionEnd`) that run the local `cookd sync` binary in the background. The companion **backs the file up** (`settings.json.cookd-bak`) first, **only adds** its own block (never overwrites your existing settings or hooks), and writes atomically. If the file isn't valid JSON, it aborts without touching it. The hooks are stored in exec form (`command` + `args: ["sync"]`) and identified by their command path, so `cookd uninstall` removes exactly cookd's block and leaves the rest intact.
+
+**Downloads a helper binary to `~/.cookd/bin/`** — the one os/arch-matched prebuilt binary from the project's GitHub release, **verified against the release's `SHA256SUMS`** before it is written. The download is one-time (~50–90 MB); the hooks then call this pinned local binary directly, never `npx`, so no code is fetched or auto-updated on every session.
+
+`cookd sync` (invoked by the hooks) reads and transmits **only** the same structural stats listed above — never prompts, code, or files. `cookd uninstall` removes both the hooks and the binary. Claude Code does not gate hook installation, so this consent and its reversal are handled entirely by the companion, in the terminal, with the exact edit shown before it is made.
+
+---
+
 ## What is never transmitted
 
 - Prompt text — anything typed in a Claude Code session
