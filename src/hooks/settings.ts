@@ -12,10 +12,19 @@ interface HookEntry { type: string; command: string; args?: string[]; async?: bo
 interface HookGroup { matcher?: string; hooks: HookEntry[]; }
 interface Settings { hooks?: Record<string, HookGroup[]>; [k: string]: unknown; }
 
-// cookd installs into both lifecycle events: SessionStart re-extends access when a
-// session begins (and flushes any queue a killed SessionEnd sync left behind);
-// SessionEnd captures the final delta of the session that just ended.
-const COOKD_EVENTS = ['SessionStart', 'SessionEnd'] as const;
+// cookd installs into three lifecycle events:
+//   SessionStart — re-extends access when a session begins, and flushes any queue
+//                  a killed SessionEnd sync left behind
+//   SessionEnd   — captures the final delta of the session that just ended
+//   Stop         — fires at the end of every assistant turn (ADR 0009). This is
+//                  what makes usage current *during* a session rather than only
+//                  at its boundaries; sessions here routinely run for days, and
+//                  one measured session ran 240 hours and would have reported
+//                  once. Firing per turn is affordable because runSyncOnce gates
+//                  twice before doing any work: a stat-only signature check
+//                  (no file contents read) and a growth threshold (journal D4),
+//                  so a turn that changed nothing costs no scan and no network.
+const COOKD_EVENTS = ['SessionStart', 'SessionEnd', 'Stop'] as const;
 
 function read(path: string): Settings {
   if (!existsSync(path)) return {};

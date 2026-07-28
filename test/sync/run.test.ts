@@ -1,8 +1,16 @@
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../src/sync/client.js', () => ({ syncWindowState: vi.fn() }));
 vi.mock('../../src/adapters/registry.js', () => ({ detectAdapter: vi.fn() }));
-vi.mock('../../src/auth/credentials.js', () => ({ saveCredentials: vi.fn() }));
+// COOKD_DIR is required by sync/gate.ts (the stat-only scan signature and
+// growth-gate state live next to the queue DB). Point it at a temp dir so the
+// test never touches a real ~/.cookd.
+vi.mock('../../src/auth/credentials.js', () => ({
+  saveCredentials: vi.fn(),
+  COOKD_DIR: join(tmpdir(), `cookd-run-test-${process.pid}`),
+}));
 vi.mock('../../src/adapters/claude-code/calibration-store.js', () => ({
   loadCalibration: () => ({ cpLimit: 1000, confidence: 'high', calibratedAt: 'now' }),
   saveCalibration: vi.fn(),
