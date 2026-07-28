@@ -1,7 +1,13 @@
 # ADR-007: Sync Sends Window Summary, Not Raw Events
 
 **Date:** 2026-06-12
-**Status:** Accepted
+**Status:** SUPERSEDED by cookd-app ADR-0009 (2026-07-27)
+**Superseded-by:** `cookd-app/docs/architecture/decisions/0009-sync-architecture-e.md`
+
+> The decision below — the companion computes the window summary locally and sends only the
+> summary — no longer holds. Sync Architecture E ships 15-minute buckets of raw token components
+> so the server derives the 5-hour rolling window, which is what lets access stop depending on
+> when the laptop last spoke. Retained unrewritten as the historical record.
 
 ## Context
 

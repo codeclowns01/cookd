@@ -1,6 +1,18 @@
 # ADR-011: Auto-refresh the companion via a consented Claude Code SessionEnd hook running a downloaded local binary
 
-- **Status**: Implemented
+- **Status**: Implemented — AMENDED 2026-07-27 by cookd-app ADR-0009
+- **Amended-by**: `cookd-app/docs/architecture/decisions/0009-sync-architecture-e.md`
+
+> **Amendment (2026-07-27).** ADR-0009 changes three things decided here:
+> (1) the *do not widen the direct-POST bypass* rule is overridden **for buckets only** — buckets
+> are absolute and max-merged, so they are safe outside `sync_queue`; delta-shaped writes
+> (`cooked_events`, history) stay on the queue;
+> (2) the deferral of a per-turn `Stop` hook is lifted — `Stop` is adopted, gated on growth rather
+> than firing every turn;
+> (3) the Heavy-scale re-architecture trigger is declared **fired**.
+> Everything else stands, including the consented-install contract, the pinned checksum-verified
+> binary, and the exec-form hook shape — the latter **empirically re-verified 2026-07-27** against
+> Claude Code v2.1.220's shipped schema, which confirms `args` and `async` are real fields.
 - **Date**: 2026-07-20
 - **Source manifest**: docs/architecture/manifests/companion-refresh-hook-scope-manifest.md
 - **Deciders**: Chief Architect (automated pre-development review) + founder (Kanwar)

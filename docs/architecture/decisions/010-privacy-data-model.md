@@ -1,7 +1,18 @@
 # ADR-010: Privacy — What the Companion Reads and Never Reads
 
 **Date:** 2026-06-11
-**Status:** Accepted
+**Status:** Accepted — AMENDED 2026-07-27 by cookd-app ADR-0009
+**Amended-by:** `cookd-app/docs/architecture/decisions/0009-sync-architecture-e.md`
+
+> **Amendment (2026-07-27), made through this ADR's own escalation clause.** The rule
+> *"No per-event data. No individual event timestamps"* is relaxed to permit usage timestamps at
+> **15-minute resolution**, with **explicit founder consent given on the record on 2026-07-27**,
+> asked and answered specifically for this amendment. This is the process this ADR requires, not a
+> silent widening.
+> **Everything else in this ADR stands unchanged:** counts-not-names, no prompt text, no tool
+> arguments, no code or file contents, no raw per-event timestamps finer than 15 minutes, and
+> `execFile()` with argument arrays rather than shell strings.
+> Still open and unrelated: the `topProject` folder-name leak this ADR already flags.
 
 ## Context
 
