@@ -1,5 +1,5 @@
 import { homedir } from 'os';
-import { join } from 'path';
+import { isAbsolute, join, relative } from 'path';
 import { readdir, realpath, stat } from 'fs/promises';
 
 export function claudeProjectsRoot(): string {
@@ -41,10 +41,45 @@ const MAX_DEPTH = 4;
  *
  * Symlinks are resolved and de-duplicated by real path, so a directory that
  * links back into its own ancestry cannot loop for ever.
+ *
+ * **The walk is confined to `dir`.** Making discovery recursive also made it
+ * possible to leave the transcript tree: `readdir` reports a symlinked directory
+ * as a link rather than a directory, so following those — which is required, and
+ * which the one-level version never had to do — meant a link planted under
+ * `~/.claude/projects/` would be walked into, and any `.jsonl` beneath it read
+ * and folded into the numbers we upload. Every resolved path is now checked
+ * against the resolved root and anything outside is skipped.
+ *
+ * The exposure was small (aggregate token counts, never file contents) and
+ * needed local write access to the user's home directory to set up. It is closed
+ * anyway, because the cost is a path comparison and the alternative is carrying
+ * a filesystem escape in code that runs unattended after every Claude turn.
+ *
+ * Note the root is resolved FIRST and comparisons are made against the resolved
+ * form. A user whose `~/.claude` is itself a symlink — dotfiles kept in a repo,
+ * a synced folder — is unaffected: their whole tree resolves under one real
+ * prefix and stays inside it.
  */
 export async function jsonlFilesIn(dir: string): Promise<TranscriptFile[]> {
   const out: TranscriptFile[] = [];
   const seen = new Set<string>();
+
+  let base: string;
+  try {
+    base = await realpath(dir);
+  } catch {
+    return out; // the project directory itself is gone
+  }
+
+  /** Is `target` the root, or genuinely beneath it? */
+  function isInside(target: string): boolean {
+    if (target === base) return true;
+    const rel = relative(base, target);
+    // `..` escapes upward; an absolute result means a different root entirely
+    // (another drive on Windows). Segment-aware, so `projects/foo-evil` is not
+    // mistaken for a child of `projects/foo`.
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+  }
 
   async function walk(current: string, depth: number): Promise<void> {
     if (depth > MAX_DEPTH) return;
@@ -55,6 +90,7 @@ export async function jsonlFilesIn(dir: string): Promise<TranscriptFile[]> {
     } catch {
       return;
     }
+    if (!isInside(real)) return;
     if (seen.has(real)) return;
     seen.add(real);
 

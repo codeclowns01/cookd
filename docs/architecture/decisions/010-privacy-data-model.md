@@ -80,6 +80,19 @@ exists so that the boundary is explicit, reviewable, and enforced at the code le
   transmitted.
 - If a future feature requires reading prompt text, file contents, or code, it must be
   proposed as a new ADR with explicit justification and user consent.
+- **Discovery is confined to the transcript tree** (added 2026-07-28, security review of the
+  ADR-0009 branch). Making discovery recursive for subagent transcripts introduced a way to leave
+  it: `readdir` reports a symlinked directory as a link rather than a directory, so following
+  those — which subagent discovery requires and the old one-level version never had to do — meant a
+  symlink planted under `~/.claude/projects/` would be walked into, and any `.jsonl` beneath it read
+  and folded into what we upload. `jsonlFilesIn` now resolves the project directory first and skips
+  any path that does not resolve inside it.
+  The exposure was small — aggregate token counts, never file contents — and setting it up required
+  local write access to the user's home directory. It is closed anyway: this ADR's whole claim is
+  that we read a bounded, named set of files, and a walk that can be steered outside that set makes
+  the claim untrue regardless of what the walk happens to extract. A user whose `~/.claude` is itself
+  a symlink (dotfiles in a repo, a synced folder) is unaffected — the confinement root is the
+  *resolved* path, so their tree resolves under one real prefix and stays inside it.
 
 ## Files affected
 
