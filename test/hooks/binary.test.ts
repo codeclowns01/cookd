@@ -40,3 +40,24 @@ describe('binary provisioning', () => {
     expect(existsSync(dest)).toBe(false);
   });
 });
+
+describe('binary version marker — the upgrade path (ADR 0009)', () => {
+  it('records the version beside the binary when one is given', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cookd-bin-'));
+    const dest = join(dir, 'cookd');
+    const bin = Buffer.from('payload');
+    const sums = `${sha256Hex(bin)}  cookd-linux-x64\n`;
+    installFromBuffers(bin, sums, 'cookd-linux-x64', dest, '0.2.0');
+    expect(readFileSync(join(dir, '.version'), 'utf8').trim()).toBe('0.2.0');
+  });
+
+  it('writes NO marker when the checksum fails', () => {
+    // A marker claiming a version that was never installed is worse than none:
+    // the next run would skip the download and keep firing the old binary.
+    const dir = mkdtempSync(join(tmpdir(), 'cookd-bin-'));
+    const dest = join(dir, 'cookd');
+    expect(() => installFromBuffers(Buffer.from('x'), `${'0'.repeat(64)}  cookd-linux-x64\n`, 'cookd-linux-x64', dest, '0.2.0'))
+      .toThrow(BinaryInstallError);
+    expect(existsSync(join(dir, '.version'))).toBe(false);
+  });
+});
