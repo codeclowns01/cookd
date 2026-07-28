@@ -25,12 +25,17 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     for (const dir of dirs) {
       const projectName = basename(dir);
       const files = await jsonlFilesIn(dir);
-      for (const file of files) {
+      for (const { path: file, depth } of files) {
         const sessionId = basename(file, '.jsonl');
         const { events, sessionStats } = await parseJsonl(file, today);
         for (const e of events) {
           e.sessionId ??= sessionId;
           e.projectName = projectName;
+          // A transcript nested below the project directory is a subagent run.
+          // Trust the entry's own isSidechain flag when it is set, and fall back
+          // to file position otherwise — subagent transcripts do not reliably
+          // carry the flag, and agentRuns/agentHeavyPct are derived from it.
+          if (depth > 0) e.isSidechain = true;
         }
         allEvents.push(...events);
         agg.prompts += sessionStats.prompts;
