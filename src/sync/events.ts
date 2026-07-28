@@ -90,4 +90,13 @@ export interface WindowSummary {
   dailyStats: DailyStats;
   tonight?: Tonight;
   cookedEvent?: CookedEventPayload;
+
+  /**
+   * Self-report, so the app's recovery screen can diagnose rather than guess
+   * (ADR 0009 / design DD2). See `sync/health.ts` for what each field can and
+   * cannot actually observe.
+   */
+  companionVersion?: string;
+  hooksInstalled?: boolean;
+  lastError?: string | null;
 }

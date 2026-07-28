@@ -1,6 +1,6 @@
 {
   "name": "@codeclowns/cookd",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "the antisocial network — field reporter CLI for developers who claudemax",
   "keywords": [
     "claude",
@@ -40,6 +40,7 @@
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
+  "packageManager": "npm@10.9.2",
   "engines": {
     "node": ">=20"
   },

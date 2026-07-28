@@ -30,6 +30,9 @@ export interface SyncState {
   /** Rolling record of scan wall-time, so the ADR's "revisit the cursor at
    *  p95 > 5s" trigger has something to fire on. Most recent last. */
   scanMs?: number[];
+  /** Why the LAST push failed, carried until a push succeeds and can report it
+   *  (ADR 0009 / design DD2). Null once reported. */
+  lastError?: string | null;
 }
 
 const STATE_PATH = () => join(COOKD_DIR, 'sync-state.json');

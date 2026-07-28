@@ -8,6 +8,7 @@ import { syncWindowState } from './client.js';
 import type { WindowSummary, SessionStatus, CookedEventPayload } from './events.js';
 import { saveCredentials, type Credentials } from '../auth/credentials.js';
 import { bucketsInWindow } from './buckets.js';
+import { readHealth, type PushFailure } from './health.js';
 import {
   loadSyncState, saveSyncState, scanSignature, signaturesEqual,
   shouldPush, recordScanMs,
@@ -87,6 +88,10 @@ export async function runSyncOnce(creds: Credentials): Promise<SyncResult> {
     modelBreakdown: Object.fromEntries(computeModelBreakdown(window.events).map(s => [s.model, s.cpTokens])),
     dailyStats: computeDailyStats(events, today, limit != null ? window.ratio * 100 : 0, sessionStats),
     tonight: computeTonight(window.events, sessionStats),
+    // Self-report (design DD2). Deliberately carries the PREVIOUS run's failure:
+    // a companion that could not reach the server could not have told it so at
+    // the time, so the report necessarily rides the next push that gets through.
+    ...readHealth((state.lastError ?? null) as PushFailure | null),
   };
 
   let out = creds;
@@ -104,7 +109,7 @@ export async function runSyncOnce(creds: Credentials): Promise<SyncResult> {
     };
   }
 
-  await syncWindowState(creds, cookedEvent ? { ...summary, cookedEvent } : summary);
+  const outcome = await syncWindowState(creds, cookedEvent ? { ...summary, cookedEvent } : summary);
 
   if (cookedEvent && resetsAt) {
     out = { ...creds, lastCookedEventSentAt: resetsAt };
@@ -112,13 +117,18 @@ export async function runSyncOnce(creds: Credentials): Promise<SyncResult> {
   }
 
   // Only recorded after the push path returns. On a network failure the payload
-  // is queued and this stays unchanged, so the next hook fire re-evaluates the
-  // growth gate against the last state the server actually accepted.
+  // is queued and the push markers stay unchanged, so the next hook fire
+  // re-evaluates the growth gate against the last state the server actually
+  // accepted — and carries the failure code forward until a push can report it.
+  const failed = outcome !== 'ok';
   saveSyncState({
     ...state,
-    lastPushedWeighted: window.weightedTokens,
-    lastPushedAt: new Date().toISOString(),
+    lastError: failed ? outcome : null,
+    ...(failed ? {} : {
+      lastPushedWeighted: window.weightedTokens,
+      lastPushedAt: new Date().toISOString(),
+    }),
   });
 
-  return { synced: true, creds: out };
+  return { synced: !failed, creds: out };
 }
