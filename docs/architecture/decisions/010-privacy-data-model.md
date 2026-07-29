@@ -1,7 +1,18 @@
 # ADR-010: Privacy — What the Companion Reads and Never Reads
 
 **Date:** 2026-06-11
-**Status:** Accepted
+**Status:** Accepted — AMENDED 2026-07-27 by cookd-app ADR-0009
+**Amended-by:** `cookd-app/docs/architecture/decisions/0009-sync-architecture-e.md`
+
+> **Amendment (2026-07-27), made through this ADR's own escalation clause.** The rule
+> *"No per-event data. No individual event timestamps"* is relaxed to permit usage timestamps at
+> **15-minute resolution**, with **explicit founder consent given on the record on 2026-07-27**,
+> asked and answered specifically for this amendment. This is the process this ADR requires, not a
+> silent widening.
+> **Everything else in this ADR stands unchanged:** counts-not-names, no prompt text, no tool
+> arguments, no code or file contents, no raw per-event timestamps finer than 15 minutes, and
+> `execFile()` with argument arrays rather than shell strings.
+> Still open and unrelated: the `topProject` folder-name leak this ADR already flags.
 
 ## Context
 
@@ -69,6 +80,19 @@ exists so that the boundary is explicit, reviewable, and enforced at the code le
   transmitted.
 - If a future feature requires reading prompt text, file contents, or code, it must be
   proposed as a new ADR with explicit justification and user consent.
+- **Discovery is confined to the transcript tree** (added 2026-07-28, security review of the
+  ADR-0009 branch). Making discovery recursive for subagent transcripts introduced a way to leave
+  it: `readdir` reports a symlinked directory as a link rather than a directory, so following
+  those — which subagent discovery requires and the old one-level version never had to do — meant a
+  symlink planted under `~/.claude/projects/` would be walked into, and any `.jsonl` beneath it read
+  and folded into what we upload. `jsonlFilesIn` now resolves the project directory first and skips
+  any path that does not resolve inside it.
+  The exposure was small — aggregate token counts, never file contents — and setting it up required
+  local write access to the user's home directory. It is closed anyway: this ADR's whole claim is
+  that we read a bounded, named set of files, and a walk that can be steered outside that set makes
+  the claim untrue regardless of what the walk happens to extract. A user whose `~/.claude` is itself
+  a symlink (dotfiles in a repo, a synced folder) is unaffected — the confinement root is the
+  *resolved* path, so their tree resolves under one real prefix and stays inside it.
 
 ## Files affected
 

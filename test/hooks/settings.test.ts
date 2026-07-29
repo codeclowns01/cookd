@@ -19,11 +19,11 @@ function cookdEntries(settings: any, event: string): any[] {
 }
 
 describe('settings.json hook management', () => {
-  it('installs cookd into BOTH SessionStart and SessionEnd, in exec form', () => {
+  it('installs cookd into SessionStart, SessionEnd AND Stop, in exec form', () => {
     const p = tmpSettings();
     installCookdHooks(p, BIN);
     const s = JSON.parse(readFileSync(p, 'utf8'));
-    for (const ev of ['SessionStart', 'SessionEnd']) {
+    for (const ev of ['SessionStart', 'SessionEnd', 'Stop']) {
       const entries = cookdEntries(s, ev);
       expect(entries).toHaveLength(1);
       expect(entries[0].command).toBe(BIN);
@@ -82,5 +82,25 @@ describe('settings.json hook management', () => {
   it('aborts on an unparseable existing file (never blind-overwrites)', () => {
     const p = tmpSettings('{ this is not json');
     expect(() => installCookdHooks(p, BIN)).toThrow(SettingsError);
+  });
+
+  it('registers Stop, the per-turn trigger that keeps usage current mid-session (ADR 0009)', () => {
+    const p = tmpSettings();
+    installCookdHooks(p, BIN);
+    const s = JSON.parse(readFileSync(p, 'utf8'));
+    expect(cookdEntries(s, 'Stop')).toHaveLength(1);
+    // Exec form must survive: Claude Code v2.1.220 ships `args` and `async`, and
+    // collapsing this into a shell string breaks on Windows paths with spaces.
+    const entry = cookdEntries(s, 'Stop')[0];
+    expect(entry.args).toEqual(['sync']);
+    expect(entry.async).toBe(true);
+  });
+
+  it('removeCookdHook clears Stop as well, leaving no orphan', () => {
+    const p = tmpSettings();
+    installCookdHooks(p, BIN);
+    removeCookdHook(p);
+    const s = JSON.parse(readFileSync(p, 'utf8'));
+    expect(s.hooks?.Stop ?? []).toEqual([]);
   });
 });

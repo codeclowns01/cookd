@@ -27,9 +27,19 @@ export async function safeFetch(url: string, options: RequestInit = {}): Promise
   }
 }
 
-export async function syncWindowState(creds: Credentials, summary: WindowSummary): Promise<void> {
+/**
+ * Why a push failed, if it did (ADR 0009 / design DD2).
+ *
+ * Reported to the server on the NEXT successful sync so the app's recovery
+ * screen can name the actual fault instead of guessing. `token_rejected` is the
+ * one worth separating: it never resolves on its own, and the fix (re-link) is
+ * different from the fix for a flaky network (wait).
+ */
+export type PushOutcome = 'ok' | 'token_rejected' | 'network';
+
+export async function syncWindowState(creds: Credentials, summary: WindowSummary): Promise<PushOutcome> {
   enqueue(summary);
-  await flushQueue(creds);
+  return flushQueue(creds);
 }
 
 export async function syncHistoricalStats(creds: Credentials, history: DailyStats[]): Promise<void> {
@@ -56,8 +66,12 @@ export async function syncLifetimeStats(creds: Credentials, stats: LifetimeStats
   if (!res.ok) throw new Error(`wrapped-sync ${res.status}`);
 }
 
-async function flushQueue(creds: Credentials): Promise<void> {
+async function flushQueue(creds: Credentials): Promise<PushOutcome> {
   const batches = peek(10);
+  // The worst outcome across the batch wins: one accepted payload does not mean
+  // the device is healthy if another was refused. Delivery behaviour is
+  // unchanged — this only observes it.
+  let outcome: PushOutcome = 'ok';
 
   for (const batch of batches) {
     try {
@@ -74,9 +88,17 @@ async function flushQueue(creds: Credentials): Promise<void> {
         ack(batch.id);
       } else {
         incrementAttempts(batch.id);
+        // 401 is the only status that means "this device's credentials are
+        // dead". Everything else — 4xx from a malformed payload, 5xx from the
+        // server — is transient from the device's point of view and retries.
+        if (res.status === 401) outcome = 'token_rejected';
+        else if (outcome === 'ok') outcome = 'network';
       }
     } catch {
       incrementAttempts(batch.id);
+      if (outcome === 'ok') outcome = 'network';
     }
   }
+
+  return outcome;
 }

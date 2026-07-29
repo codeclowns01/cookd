@@ -23,7 +23,7 @@ import chalk from 'chalk';
 import { createInterface } from 'readline';
 import { STAMP, MUT, FLAME, FAINT } from '../ui/theme.js';
 import { formatTokens, formatDuration } from '../ui/helpers.js';
-import { shouldSkipPressCode } from './init-guard.js';
+import { shouldSkipPressCode, shouldOfferAutoSync, type InitOutcome } from './init-guard.js';
 import { runSyncOnce } from '../sync/run.js';
 import { installAutoSync } from '../hooks/install.js';
 import { binaryPath } from '../hooks/binary.js';
@@ -103,7 +103,7 @@ function spinnerFrame(tick: number): string {
 }
 
 interface InitAppProps {
-  onDone: (outcome: 'linked' | 'other') => void;
+  onDone: (outcome: InitOutcome) => void;
 }
 
 function InitApp({ onDone }: InitAppProps): React.ReactElement {
@@ -147,7 +147,11 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
     if (shouldSkipPressCode(existing)) {
       setState('resync');
       try { await runSyncOnce(existing!); } catch { /* non-fatal — queued, retries next sync */ }
-      setTimeout(() => onDone('other'), 1500);
+      // 'resynced', not 'other': an already-linked device must still reach
+      // offerAutoSync, or the users who most need the hook (everyone who linked
+      // before auto-sync existed) can never be offered it. Kept distinct from
+      // 'linked' so the press-code path stays separate. (Defect B2.)
+      setTimeout(() => onDone('resynced'), 1500);
       return;
     }
 
@@ -487,10 +491,10 @@ export async function runInit(version: string): Promise<void> {
     return;
   }
   try {
-    const outcome = await new Promise<'linked' | 'other'>(resolve => {
+    const outcome = await new Promise<InitOutcome>(resolve => {
       const { unmount } = render(<InitApp onDone={(o) => { unmount(); resolve(o); }} />);
     });
-    if (outcome === 'linked') {
+    if (shouldOfferAutoSync(outcome)) {
       await offerAutoSync(version, (s) => process.stdout.write(s + '\n'));
     }
   } catch (e) {

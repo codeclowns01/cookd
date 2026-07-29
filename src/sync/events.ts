@@ -1,3 +1,5 @@
+import type { UsageBucket } from './buckets.js';
+
 export type SessionStatus = 'idle' | 'cooking' | 'cookd';
 
 export interface Tonight {
@@ -65,6 +67,17 @@ export interface LifetimeStats {
 }
 
 export interface WindowSummary {
+  /**
+   * The current 5-hour window as 15-minute buckets of raw token components
+   * (ADR 0009). Rides the same request as the summary rather than a second
+   * round trip.
+   *
+   * Safe on the existing `sync_queue` despite ADR 0009 saying buckets would
+   * bypass it: the server merges buckets with `greatest()` per component, so a
+   * replayed stale batch cannot lower a stored value. The ADR's concern was a
+   * stale *snapshot* overwriting a fresher one, which max-merge removes.
+   */
+  buckets?: UsageBucket[];
   status: SessionStatus;
   usedTokens: number;
   limitTokens: number | null;
@@ -77,4 +90,13 @@ export interface WindowSummary {
   dailyStats: DailyStats;
   tonight?: Tonight;
   cookedEvent?: CookedEventPayload;
+
+  /**
+   * Self-report, so the app's recovery screen can diagnose rather than guess
+   * (ADR 0009 / design DD2). See `sync/health.ts` for what each field can and
+   * cannot actually observe.
+   */
+  companionVersion?: string;
+  hooksInstalled?: boolean;
+  lastError?: string | null;
 }

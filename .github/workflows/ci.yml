@@ -36,3 +36,73 @@ jobs:
 
       - name: build
         run: npm run build
+
+  # ———————————————————————————————————————————————————————————————————————
+  # Compile the release binaries on every PR, not only at tag time.
+  # ———————————————————————————————————————————————————————————————————————
+  #
+  # Both releases so far (v0.1.0, v0.1.1) failed here: `publish to npm`
+  # succeeded, `compile / linux-x64` failed, the other four were cancelled and
+  # `create github release` was skipped. So npm has a package and GitHub has no
+  # binaries — and `downloadBinary()` has 404'd for its entire existence, which
+  # is why ADR-011 recorded auto-sync as "dormant until a release exists".
+  #
+  # The compile error was fixed in #6 (`--external react-devtools-core`) two days
+  # after the last release attempt, and has never been exercised by a tag. So
+  # without this job the next `v*` tag would be the first test of the fix — and
+  # `npm publish` runs BEFORE the compile and cannot be taken back.
+  #
+  # Same lesson as the migration harness in cookd-app: a step that only ever runs
+  # at ship time is a step that has never run. This mirrors release.yml's compile
+  # exactly (same targets, same flags) but uploads nothing and publishes nothing.
+  compile:
+    name: compile / ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # one broken target should not hide the state of the rest
+      matrix:
+        include:
+          - { target: linux-x64,    os: ubuntu-latest,  bun-target: bun-linux-x64 }
+          - { target: linux-arm64,  os: ubuntu-latest,  bun-target: bun-linux-arm64 }
+          - { target: darwin-x64,   os: macos-latest,   bun-target: bun-darwin-x64 }
+          - { target: darwin-arm64, os: macos-latest,   bun-target: bun-darwin-arm64 }
+          - { target: windows-x64,  os: windows-latest, bun-target: bun-windows-x64 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: setup node (for npm ci)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: build
+        run: npm run build
+
+      - name: compile binary
+        run: bun build ./dist/cli.js --compile --target=${{ matrix.bun-target }} --outfile=cookd-${{ matrix.target }} --external react-devtools-core
+
+      # The installer resolves an EXACT asset name per platform
+      # (hooks/platform.ts TARGETS) and then checksum-verifies it. A compile that
+      # succeeds under a different filename still 404s at install time, so assert
+      # the artifact this platform would actually publish exists on disk.
+      - name: verify the artifact matches the name the installer asks for
+        shell: bash
+        run: |
+          expected="cookd-${{ matrix.target }}"
+          [ "${{ matrix.target }}" = "windows-x64" ] && expected="cookd-windows-x64.exe"
+          if [ ! -f "$expected" ]; then
+            echo "::error::compiled binary '$expected' not found — hooks/platform.ts asks for this exact name"
+            ls -la cookd-* || true
+            exit 1
+          fi
+          echo "ok: $expected ($(wc -c < "$expected") bytes)"

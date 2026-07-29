@@ -1,8 +1,13 @@
 # Codebase Architecture: cookd-companion (`@codeclowns/cookd`)
 
-> Derived from: cookd-companion @ `878bd8b` · Last verified: 2026-07-20
+> Derived from: cookd-companion @ `e6c6b65` · Last verified: 2026-07-27
 > Refresh: if `git rev-parse --short HEAD` matches, trust this; else
-> `git diff --name-only 878bd8b..HEAD` and update only affected sections.
+> `git diff --name-only e6c6b65..HEAD` and update only affected sections.
+> Incremental refresh 2026-07-27 (cookd-app ADR 0009 pass, Sync Architecture E): marker
+> 878bd8b→e6c6b65 (PR #7 — ADR-011 refresh hook landed: `hooks/*`, `sync/run.ts`,
+> `commands/{sync,uninstall,init-guard}`, `ui/ink/Consent.tsx`). Sections updated below:
+> one tech-debt item is now CLOSED, two new findings added, and the hook-schema question
+> that ADR-011 left unverified is now **empirically resolved**.
 
 ## Contents
 - Architectural style & layering
@@ -59,7 +64,11 @@ The build is plain `tsc` (`npm run build`). Release also produces 5 bun-compiled
 - **New surface (none exists yet):** a Claude Code hook installer that writes `~/.claude/settings.json` and a binary provisioner writing `~/.cookd/bin/`. No prior code touches `settings.json`.
 
 ## Load-bearing tech debt
-- **`init.tsx` always shows a press code** (`init.tsx:177-196`) — no already-linked branch, so any "just re-sync" path wrongly demands a new code. Blocks the re-init guard until fixed.
+- ~~**`init.tsx` always shows a press code**~~ — **CLOSED** (PR #7): `shouldSkipPressCode(existing)` at `init.tsx:147-152` branches an already-linked device into a silent re-sync.
+- 🔴 **But the re-init guard introduced a new defect (verified 2026-07-27):** that branch resolves `onDone('other')`, while `:493` gates `offerAutoSync` on `outcome === 'linked'`. **An already-linked user can therefore never be offered the auto-sync hook install** — the exact population that most needs it. Journal defect B2.
+- 🔴 **`resets_at` / `window_start` are written `NULL` on every sync (verified 2026-07-27).** `run.ts:42-43,55-56` send ISO **strings**; `usage-ingest/index.ts:70-71`'s `toIso` returns non-null only for `typeof ms === "number"`. Cross-repo contract mismatch, silent, live in production. Journal defect B1.
+- 🔴 **Subagent transcripts are never read (verified 2026-07-27).** `paths.ts:9-19` reads exactly one directory level and `jsonlFilesIn` does not recurse. Consequence: `tonight.agentRuns` and `agentHeavyPct` are structurally always 0, and ~8% of real usage machine-wide (21% in agent-heavy sessions) is uncounted. Journal defect B3.
+- ✅ **RESOLVED — the hook exec-form question ADR-011 could not verify.** Probed the shipped `claude.exe` (v2.1.220) directly: its schema contains `args` — *"Argument list for exec form. When present, `command` is resolved as an executable and spawned directly with these arguments — no shell"* — and `async` — *"If true, hook runs in background without blocking"* (plus a newer `asyncRewake`). **`settings.ts:48`'s existing shape is correct; do not "fix" it into a shell string.** Residual risk: both fields are publicly undocumented, confirmed only for v2.1.220, and no Claude Code version floor is pinned anywhere — an older build could yield a silently no-op hook.
 - **Two outbound paths** — `syncWindowState` (durable queue) vs. direct POST in `syncLifetimeStats`/`syncHistoricalStats` (`client.ts:35,47`). New sync work should go through the queue, not widen the bypass.
 - **No PID lock / single-instance guard** — concurrent `cookd` processes (e.g., parallel `SessionEnd` fires) are unguarded; relies on SQLite WAL + backend idempotency to stay safe.
 - **npm package is JS-only** (`package.json:25-33`) while the runnable binaries live on GitHub Releases (`release.yml`) — the split that shapes ADR-011's provisioning decision.
