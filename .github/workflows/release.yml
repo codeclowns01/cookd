@@ -23,8 +23,14 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: npm
       
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 20 bundles npm 10.
+      # Pinned to the 11 line rather than @latest: npm@latest is now 12, which
+      # requires node ^22.22.2 || ^24.15.0 || >=26.0.0 and so fails EBADENGINE
+      # here — a floating tag broke the v0.2.0 release once already. npm 11
+      # supports ^20.17.0 || >=22.9.0, so it tracks this job's node without
+      # coupling the release to whatever npm ships next.
       - name: upgrade npm for trusted publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: install
         run: npm ci
