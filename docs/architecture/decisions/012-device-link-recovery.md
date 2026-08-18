@@ -1,6 +1,6 @@
 # ADR-012: A linked laptop always mints a press code, and never asserts a link state it has not verified
 
-- **Status**: Accepted
+- **Status**: Implemented with deviations — Increment A only (see Conformance Check)
 - **Date**: 2026-08-18
 - **Source manifest**: `docs/architecture/manifests/device-link-recovery-scope-manifest.md`
 - **Deciders**: Chief Architect (automated pre-development review)
@@ -260,3 +260,46 @@ destructive path with none of its guard rails.
 This is a design decision, not an implementation plan. Next: an implementation plan against this ADR,
 then `/plan-eng-review` and `/plan-design-review`. The app/backend slice is cross-referenced from
 `cookd-app/docs/architecture/decisions/0010-device-link-recovery-backend.md`.
+
+---
+
+## Conformance Check — 2026-08-18
+
+Branch `fix/already-linked-press-code`, 5 commits, base `bd3a590`. **Increment A (companion) only**;
+A2 and B are deliberately out of this branch and tracked in cookd-app ADR-0010.
+
+**Score: 8/8 in-scope checkable claims implemented (100%).** 5 claims out of scope for this branch.
+
+| # | Claim | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Linked device reaches `deviceLinkStart` and prints a code, both flows | ✅ | `init.tsx:277` (Ink), `:592` (plain); withholding branch gone; `init-relink.test.ts` asserts a code for all three health states |
+| 2 | Both flows use ONE shared function; no duplicated copy literals | ✅ | `resolveRelink()` in `init-guard.ts`; grep for every banner literal outside `ui/ink/Relink.ts` returns nothing |
+| 3 | `runSyncOnce` returns a discriminated outcome; no unchecked success; Ink reports the resync | ✅ | `SyncOutcome` in `run.ts`; `init.tsx:425` renders `resyncLine`; the only remaining `"synced."` occurrences are prose in comments |
+| 4 | `pollForLink` preserves both watermarks; init threads returned creds | ✅ | `device-link.ts:90` `...existing`; `preflight()` captures `res.creds`; `test/auth/device-link.test.ts` |
+| 5 | Relink poll ≤120s; non-TTY relink never blocks | ✅ | `RELINK_POLL_MS` at `:111`, applied `:294`/`:625`; non-TTY early return `:618`; leash covered by test |
+| 6 | Dead credentials prompt an explicit confirm naming the loss, before any code | ✅ (A-local form) | `preflight()` + `confirmStartOver()`; `askYesNoDefaultNo` defaults NO; declining returns `aborted` and mints nothing. Keyed on forced-push health per delta **E1**, not `link.state` — that upgrade is Task 11 (Increment B), as planned |
+| 8 | `cookd sync` issues no call to `device-link-start` | ✅ | `deviceLinkStart` imported only by `init.tsx` |
+| 9 | Increment A's banner never prints an unhedged cached handle | ✅ | `relinkLines()` emits "last known as @x"; asserted in `init-relink.test.ts` |
+| 7, 10–13 | `device-link-start` pure read; `Recovery.tsx`; `README:64`; session reaper; CI test registration | — out of scope | A2/B — cookd-app ADR-0010. **AC11 (README) was in fact done here** (`5421686`) |
+
+### Divergence found and corrected during verification
+
+🔻→✅ **The poll leash made both flows claim "press code expired." after 120s, while the code
+remained redeemable for ~8 more minutes.** A false assertion introduced by this very ADR's own
+decision 7, and precisely the defect class the ADR exists to eliminate. Fixed in `d2da211` with a
+distinct `stopped-waiting` state that says what is actually true — and notes that on a reauth the
+laptop need not witness the redemption at all, since no new device token is issued.
+
+### Inconclusive — needs runtime verification
+
+❓ **End-to-end recovery against the live backend has not been run.** Executing `cookd init` forces a
+real push and mints a real press code on a real account, so it was deliberately left to the operator.
+The two paths that most need it: (a) signed-out app + healthy laptop → code → app returns to the
+*same* account; (b) unlinked device → confirmation → declining leaves everything untouched. `/qa`.
+
+### Merge readiness
+
+🟡 **Mostly implemented, divergences explained.** Every in-scope claim is implemented, the one
+divergence was found and fixed rather than accepted, and the out-of-scope claims are consciously
+deferred to cookd-app ADR-0010 rather than missed. The live end-to-end run is the remaining gate
+before this reaches testers.
