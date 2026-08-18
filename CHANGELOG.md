@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Account lockout: an already-linked laptop now always prints a press code.** The press code is cookd's only credential, so the previous "already linked, nothing to do" shortcut (ADR-011) withheld the sole way back into an account — users were locked out of the app while their laptop kept syncing happily. Superseded by ADR-012
+- `cookd init` no longer reports `synced.` for a push the server rejected, or after making no network call at all. `runSyncOnce` now returns *why* it did what it did instead of one boolean meaning four different things
+- Re-linking no longer wipes the local sync watermarks, which had made every recovery re-push the entire lifetime history
+- `cookd init` no longer blocks for ten minutes on a healthy machine, and never blocks at all when not attached to a terminal
+- The auto-sync consent prompt no longer reappears once the hooks are installed
+
+### Added
+- Revoked-credential warning: if the server no longer recognises this laptop, `init` explains that continuing starts a **new** account — losing handle, history, badges and streaks — and requires an explicit `y` before minting anything. Declining changes nothing
+- `cookd logout` — releases this machine by clearing local credentials, leaving the auto-sync hooks and your account alone
+
 ### Added
 - 15-minute usage buckets — the companion now ships the *shape* of usage (raw token components per 15-minute slot) instead of a single pre-computed number, so the 5-hour window can be derived at read time. Components are stored unweighted, which means the token weights can be re-tuned later and all history re-derives correctly
 - `Stop` hook — fires at the end of every assistant turn, so usage stays current *during* a session rather than only at its boundaries. Sessions here routinely run for days; one measured session ran 240 hours and would have reported once
