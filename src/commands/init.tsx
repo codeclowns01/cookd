@@ -98,6 +98,7 @@ type InitState =
   | 'network-error'
   | 'press-code'
   | 'expired'
+  | 'stopped-waiting'
   | 'success'
   | 'resync';
 
@@ -294,7 +295,11 @@ function InitApp({ onDone, pre }: InitAppProps): React.ReactElement {
       3000, relinking ? RELINK_POLL_MS : undefined,
     );
     if (!creds) {
-      setState('expired');
+      // A relink gives up after RELINK_POLL_MS, but the code lives ~10 minutes
+      // server-side — saying "expired" would be a lie, and on a reauth the
+      // laptop does not need to witness the redemption anyway (no new token is
+      // issued; it keeps the one it has).
+      setState(relinking ? 'stopped-waiting' : 'expired');
       // An already-linked device that ignored the code still resynced, and must
       // still reach offerAutoSync — that is the population the hook exists for
       // (defect B2). Letting the code expire is the normal outcome for someone
@@ -434,6 +439,13 @@ function InitApp({ onDone, pre }: InitAppProps): React.ReactElement {
         <>
           <Text>{'  ' + chalk.hex(FLAME).bold('transmission failure.')}</Text>
           <Text>{'  ' + chalk.hex(FAINT)(error || 'check your connection and try again.')}</Text>
+        </>
+      )}
+
+      {state === 'stopped-waiting' && (
+        <>
+          <Text>{'  ' + chalk.hex(FAINT)('not waiting any longer — but your code is still good.')}</Text>
+          <Text>{'  ' + chalk.hex(MUT).italic('— enter it in the app; this laptop doesn’t need to be watching.')}</Text>
         </>
       )}
 
@@ -625,8 +637,13 @@ async function runInitPlain(version: string, pre: Preflight): Promise<void> {
     3000, relinking ? RELINK_POLL_MS : undefined,
   );
   if (!creds) {
-    p(chalk.hex(FAINT)('  press code expired.'));
-    p(chalk.hex(MUT)("  — run cookd init again when you're ready."));
+    if (relinking) {
+      p(chalk.hex(FAINT)('  not waiting any longer — but your code is still good.'));
+      p(chalk.hex(MUT)('  — enter it in the app; this laptop doesn’t need to be watching.'));
+    } else {
+      p(chalk.hex(FAINT)('  press code expired.'));
+      p(chalk.hex(MUT)("  — run cookd init again when you're ready."));
+    }
     // An expired code on a relink is the normal "I only wanted a refresh"
     // outcome — it must not cost the machine the auto-sync offer (defect B2).
     if (relinking) await offerAutoSync(version, p);
