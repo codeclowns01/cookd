@@ -20,16 +20,47 @@ function deriveStatus(ratio: number, limit: number | null): SessionStatus {
   return 'cooking';
 }
 
-export interface SyncResult { synced: boolean; creds: Credentials; }
+/**
+ * Why a sync did what it did (ADR-012 decision 4 / eng-review delta E1).
+ *
+ * This used to be `{ synced: boolean }`, and that boolean meant four unrelated
+ * things: no agent installed, nothing changed since the last push, the growth
+ * gate declined, or the server refused us. `init` therefore printed "synced."
+ * over a 401 — and, once the ADR-011 hooks made the stat gate the common path,
+ * printed it after making no network call at all. A caller cannot tell the user
+ * the truth about a signal that was thrown away at the boundary.
+ */
+export type SyncOutcome =
+  | 'no_adapter'      // no supported agent on this machine
+  | 'unchanged'       // stat-only signature identical to the last push (gate 1)
+  | 'gated'           // real growth below the push threshold (gate 2)
+  | 'ok'              // the server accepted it — the ONLY proof the token is alive
+  | 'token_rejected'  // 401: these credentials are dead
+  | 'network';        // could not reach the server — proves nothing either way
+
+export interface SyncResult { outcome: SyncOutcome; creds: Credentials; }
+
+export interface SyncOptions {
+  /**
+   * Skip both gates and push unconditionally.
+   *
+   * `init` — and only `init` — passes this. A recovery attempt has to *prove*
+   * the token is alive or dead, and both gates return before any HTTP, so a
+   * gated run learns nothing. Hooks keep the gates, which preserves ADR-011's
+   * TG1 invariant that an idle machine costs exactly zero: the bypass runs at
+   * human-initiated `init` frequency, never at `Stop` frequency.
+   */
+  force?: boolean;
+}
 
 /**
  * One-shot sync: read current usage, build the WindowSummary, push it via the queue.
  * Stateless — used by both the watch loop and the headless `cookd sync` command.
  * Persists an updated cooked-event marker onto creds when a fresh cook is sent.
  */
-export async function runSyncOnce(creds: Credentials): Promise<SyncResult> {
+export async function runSyncOnce(creds: Credentials, opts: SyncOptions = {}): Promise<SyncResult> {
   const adapter = await detectAdapter();
-  if (!adapter) return { synced: false, creds };
+  if (!adapter) return { outcome: 'no_adapter', creds };
 
   // Gate 1 — stat only, no file contents read. An idle machine costs exactly
   // zero: no scan, no network, no background work (TG1). `Stop` fires every
@@ -37,8 +68,8 @@ export async function runSyncOnce(creds: Credentials): Promise<SyncResult> {
   // actual usage.
   let state = loadSyncState();
   const signature = await scanSignature();
-  if (state.lastPushedAt && signaturesEqual(signature, state.signature)) {
-    return { synced: false, creds };
+  if (!opts.force && state.lastPushedAt && signaturesEqual(signature, state.signature)) {
+    return { outcome: 'unchanged', creds };
   }
 
   const ccAdapter = adapter instanceof ClaudeCodeAdapter ? adapter : null;
@@ -58,9 +89,9 @@ export async function runSyncOnce(creds: Credentials): Promise<SyncResult> {
   // Gate 2 — push on *growth*, not elapsed time (journal D4). This bounds how
   // wrong the displayed number can be rather than how old it is, which is what
   // makes a 10-day session behave the same as a 10-minute one.
-  if (!shouldPush(window.weightedTokens, limit, state.lastPushedWeighted)) {
+  if (!opts.force && !shouldPush(window.weightedTokens, limit, state.lastPushedWeighted)) {
     saveSyncState(state);
-    return { synced: false, creds };
+    return { outcome: 'gated', creds };
   }
 
   const resetFromError = extractLatestResetTime(events);
@@ -130,5 +161,8 @@ export async function runSyncOnce(creds: Credentials): Promise<SyncResult> {
     }),
   });
 
-  return { synced: !failed, creds: out };
+  // `outcome` is the server's verdict, passed through verbatim. On a forced run
+  // this is what proves the token alive ('ok') or dead ('token_rejected');
+  // 'network' proves neither and callers must not treat it as either.
+  return { outcome, creds: out };
 }
