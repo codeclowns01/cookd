@@ -61,7 +61,14 @@ export async function runWatch(): Promise<void> {
     const res = await runSyncOnce(creds);
     creds = res.creds;
     lastSyncTime = Date.now();
-    process.stdout.write(chalk.hex(FAINT)('  synced\n'));
+    // Say what actually happened (ADR-012 decision 4). "synced" over a rejected
+    // token is the same lie `init` was telling.
+    process.stdout.write(chalk.hex(FAINT)(
+      res.outcome === 'ok' ? '  synced\n'
+      : res.outcome === 'token_rejected' ? '  this laptop\'s press pass was refused — run: cookd init\n'
+      : res.outcome === 'network' ? '  could not reach the press — will retry\n'
+      : '  nothing new to send\n'
+    ));
   } catch {
     process.stdout.write(chalk.hex(FAINT)('  initial sync failed\n'));
   }

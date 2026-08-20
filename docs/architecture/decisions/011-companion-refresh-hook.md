@@ -1,7 +1,17 @@
 # ADR-011: Auto-refresh the companion via a consented Claude Code SessionEnd hook running a downloaded local binary
 
-- **Status**: Implemented — AMENDED 2026-07-27 by cookd-app ADR-0009
+- **Status**: Implemented — AMENDED 2026-07-27 by cookd-app ADR-0009; **decision #4 + AC5 SUPERSEDED 2026-08-18 by ADR-012**
 - **Amended-by**: `cookd-app/docs/architecture/decisions/0009-sync-architecture-e.md`
+- **Superseded-in-part-by**: `012-device-link-recovery.md`
+
+> **Partial supersession (2026-08-18).** ADR-012 overturns **decision #4 ("Re-init guard") and
+> acceptance criterion #5** only. Trigger: Play Store closed-track testing, 2026-08-17/18 — two
+> founder reports of being locked out of the app while the backend link stayed healthy and syncing.
+> The guard withheld the press code from any device holding a token; because the press code is
+> cookd's **only** credential, that withheld the sole means of account recovery. This ADR's open
+> question **R3 ("re-init guard credential branch")** named the surface; the lockout consequence was
+> not caught here. The decision text below is left intact as the historical record — see ADR-012 for
+> the replacement. Everything else in this ADR still stands.
 
 > **Amendment (2026-07-27).** ADR-0009 changes three things decided here:
 > (1) the *do not widen the direct-POST bypass* rule is overridden **for buckets only** — buckets

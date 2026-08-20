@@ -80,6 +80,14 @@ program
   });
 
 program
+  .command('logout')
+  .description('release this machine (clears local credentials; hooks stay)')
+  .action(async () => {
+    const { runLogout } = await import('./commands/logout.js');
+    await runLogout();
+  });
+
+program
   .command('uninstall')
   .description('turn off auto-sync (remove the hooks + local binary)')
   .action(async () => {

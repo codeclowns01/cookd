@@ -61,7 +61,7 @@ What consent installs, exactly:
 cookd uninstall      # removes the hooks and the binary; your account is untouched
 ```
 
-If you decline, nothing is installed — re-run `npx @codeclowns/cookd` whenever you want to refresh (an already-linked machine syncs silently, no new press code). Auto-sync ships from the release that introduces it; on older versions the offer degrades to "re-run to refresh."
+If you decline, nothing is installed — re-run `npx @codeclowns/cookd init` whenever you want to refresh. An already-linked machine re-syncs first and then still prints a press code: the code is the only way back into your account, so cookd never withholds it. Ignore it if everything already looks right. Auto-sync ships from the release that introduces it; on older versions the offer degrades to "re-run to refresh."
 
 ---
 

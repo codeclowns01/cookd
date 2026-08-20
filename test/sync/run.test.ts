@@ -56,14 +56,14 @@ describe('runSyncOnce', () => {
     });
     const result = await runSyncOnce(creds);
     expect(syncWindowState).toHaveBeenCalledTimes(1);
-    expect(result.synced).toBe(true);
+    expect(result.outcome).toBe('ok');
   });
 
-  it('returns synced=false when no agent is detected', async () => {
+  it('reports no_adapter when no agent is detected', async () => {
     (detectAdapter as any).mockResolvedValue(null);
     const result = await runSyncOnce(creds);
     expect(syncWindowState).not.toHaveBeenCalled();
-    expect(result.synced).toBe(false);
+    expect(result.outcome).toBe('no_adapter');
   });
 
   it('reports its own version and hook state so the app can diagnose (design DD2)', async () => {
@@ -83,6 +83,52 @@ describe('runSyncOnce', () => {
     expect(summary.lastError).toBeNull();
   });
 
+  /**
+   * ADR-012 / eng-review delta E1. The four early returns and the push result used
+   * to collapse into one boolean, so `init` printed "synced." after making zero
+   * network calls. Each cause now names itself.
+   */
+  it('distinguishes unchanged from ok, and force bypasses the gate (E1)', async () => {
+    const adapter = {
+      events: async () => ([{
+        ts: new Date(), model: 'claude-sonnet-4-6',
+        inputTokens: 10, outputTokens: 5,
+        cacheCreationTokens: 0, cacheCreation1hTokens: 0, cacheReadTokens: 0,
+      }]),
+      getSessionStats: () => ({ prompts: 1, yoloPrompts: 0, toolCounts: {}, toolErrors: 0 }),
+    };
+    (detectAdapter as any).mockResolvedValue(adapter);
+
+    // First push records the signature + watermark.
+    expect((await runSyncOnce(creds)).outcome).toBe('ok');
+
+    // Nothing changed on disk -> gate 1 short-circuits before any HTTP.
+    (syncWindowState as any).mockClear();
+    expect((await runSyncOnce(creds)).outcome).toBe('unchanged');
+    expect(syncWindowState).not.toHaveBeenCalled();
+
+    // ...but `init` must PROVE the token is alive, so force skips both gates.
+    // Without this the revoked-token warning could never fire for the hook-installed
+    // population, which is now the default one.
+    (syncWindowState as any).mockClear();
+    expect((await runSyncOnce(creds, { force: true })).outcome).toBe('ok');
+    expect(syncWindowState).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces token_rejected instead of swallowing it', async () => {
+    (detectAdapter as any).mockResolvedValue({
+      events: async () => ([{
+        ts: new Date(), model: 'claude-sonnet-4-6',
+        inputTokens: 10, outputTokens: 5,
+        cacheCreationTokens: 0, cacheCreation1hTokens: 0, cacheReadTokens: 0,
+      }]),
+      getSessionStats: () => ({ prompts: 1, yoloPrompts: 0, toolCounts: {}, toolErrors: 0 }),
+    });
+    (syncWindowState as any).mockResolvedValue('token_rejected');
+    const result = await runSyncOnce(creds);
+    expect(result.outcome).toBe('token_rejected');
+  });
+
   it('does not advance the growth gate when the push failed', async () => {
     // The gate compares against the last total THE SERVER ACCEPTED. Advancing it
     // on a failed push would make the companion believe the server is current,
@@ -99,7 +145,7 @@ describe('runSyncOnce', () => {
     (syncWindowState as any).mockResolvedValue('network');
 
     const result = await runSyncOnce(creds);
-    expect(result.synced).toBe(false);
+    expect(result.outcome).toBe('network');
 
     const state = loadSyncState();
     expect(state.lastPushedWeighted).toBeUndefined();

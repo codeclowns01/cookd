@@ -23,11 +23,16 @@ import chalk from 'chalk';
 import { createInterface } from 'readline';
 import { STAMP, MUT, FLAME, FAINT } from '../ui/theme.js';
 import { formatTokens, formatDuration } from '../ui/helpers.js';
-import { shouldSkipPressCode, shouldOfferAutoSync, type InitOutcome } from './init-guard.js';
-import { runSyncOnce } from '../sync/run.js';
+import {
+  isAlreadyLinked, shouldOfferAutoSync, resolveRelink,
+  type InitOutcome, type RelinkDecision,
+} from './init-guard.js';
+import { healthFromOutcome, relinkColorFor } from '../ui/ink/Relink.js';
+import { runSyncOnce, type SyncOutcome } from '../sync/run.js';
 import { installAutoSync } from '../hooks/install.js';
 import { binaryPath } from '../hooks/binary.js';
 import { consentLines, consentColorFor } from '../ui/ink/Consent.js';
+import { hasCookdHook, claudeSettingsPath } from '../hooks/settings.js';
 
 async function syncAfterLink(
   creds: Credentials,
@@ -93,20 +98,76 @@ type InitState =
   | 'network-error'
   | 'press-code'
   | 'expired'
+  | 'stopped-waiting'
   | 'success'
-  | 'resync'
-  | 'already-linked';
+  | 'resync';
 
 function spinnerFrame(tick: number): string {
   const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   return frames[tick % frames.length];
 }
 
-interface InitAppProps {
-  onDone: (outcome: InitOutcome) => void;
+/** How long a RELINK waits for redemption. A returning user is watching their own
+ *  terminal; the 10-minute default is for a first-time link that needs app-install time. */
+const RELINK_POLL_MS = 120_000;
+
+/**
+ * Everything that must be settled BEFORE the UI starts.
+ *
+ * The revoked-token confirmation needs stdin, and Ink owns stdin once rendered —
+ * the established pattern (`offerAutoSync`) only prompts after unmount. Deciding
+ * here keeps one confirmation implementation for both flows instead of two, and
+ * means a declined confirm mints nothing at all.
+ */
+export interface Preflight {
+  creds: Credentials | null;
+  decision: RelinkDecision;
+  /** User declined to start over — do nothing further. */
+  aborted: boolean;
 }
 
-function InitApp({ onDone }: InitAppProps): React.ReactElement {
+export async function preflight(
+  confirm: (lines: string[]) => Promise<boolean>,
+): Promise<Preflight> {
+  const existing = await loadCredentials();
+  if (!isAlreadyLinked(existing)) {
+    return {
+      creds: existing,
+      decision: resolveRelink({ alreadyLinked: false, health: 'unknown', outcome: null, handle: null }),
+      aborted: false,
+    };
+  }
+
+  // force: true — a recovery attempt must PROVE the token alive or dead. Both
+  // gates return before any HTTP, so without this the warning could never fire
+  // for the hook-installed population, which is now the default one (E1).
+  let outcome: SyncOutcome = 'network';
+  let creds = existing!;
+  try {
+    const res = await runSyncOnce(existing!, { force: true });
+    outcome = res.outcome;
+    creds = res.creds; // may carry a freshly-written cooked-event watermark
+  } catch { /* non-fatal — queued, retries next sync */ }
+
+  const decision = resolveRelink({
+    alreadyLinked: true,
+    health: healthFromOutcome(outcome),
+    outcome,
+    handle: creds.handle,
+  });
+
+  if (decision.requiresConfirm && !(await confirm(decision.bannerLines))) {
+    return { creds, decision, aborted: true };
+  }
+  return { creds, decision, aborted: false };
+}
+
+interface InitAppProps {
+  onDone: (outcome: InitOutcome) => void;
+  pre: Preflight;
+}
+
+function InitApp({ onDone, pre }: InitAppProps): React.ReactElement {
   const [state, setState] = useState<InitState>('cold-open');
   const [tick, setTick] = useState(0);
   const [countdown, setCountdown] = useState(600);
@@ -115,6 +176,7 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
   const [error, setError] = useState('');
   const [linkedHandle, setLinkedHandle] = useState('');
   const [linkedDeviceId, setLinkedDeviceId] = useState('');
+  const [wasLinked, setWasLinked] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setTick(t => t + 1), 100);
@@ -141,40 +203,57 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
     setState('reading');
     await new Promise(r => setTimeout(r, 800));
 
-    const existing = await loadCredentials();
+    const existing = pre.creds;
+    const relinking = isAlreadyLinked(existing);
+    const decision = pre.decision;
 
-    // Re-init guard: an already-linked device just re-syncs silently, no press code.
-    if (shouldSkipPressCode(existing)) {
+    // An already-linked device re-syncs first — that convenience is kept. What
+    // changed: it no longer STOPS there.
+    //
+    // Defect B3. The old guard returned right here, so a machine holding any
+    // device token could never obtain a press code again. That is fine while the
+    // token still points at the account the user is signed into — and a hard
+    // block the moment it does not. A tester who installs the app fresh and signs
+    // into a NEW account has a laptop still validly linked to the OLD one: the
+    // server accepts every push, the app sees no device, and the one action that
+    // would fix it (present a press code) was unreachable. No probe can detect
+    // that case, because nothing about it is broken from the server's side — the
+    // token is live, it is just pointed elsewhere. So the code is always offered
+    // and the user decides whether they need it.
+    // The resync already ran in preflight() — its result is in `decision`.
+    if (relinking) {
+      setWasLinked(true);
+      setLinkedHandle(existing!.handle);
       setState('resync');
-      try { await runSyncOnce(existing!); } catch { /* non-fatal — queued, retries next sync */ }
-      // 'resynced', not 'other': an already-linked device must still reach
-      // offerAutoSync, or the users who most need the hook (everyone who linked
-      // before auto-sync existed) can never be offered it. Kept distinct from
-      // 'linked' so the press-code path stays separate. (Defect B2.)
-      setTimeout(() => onDone('resynced'), 1500);
-      return;
+      await new Promise(r => setTimeout(r, 900));
     }
 
     const adapter = await detectAdapter();
-    if (!adapter) {
+    if (!adapter && !relinking) {
       setState('no-data');
       setTimeout(() => onDone('other'), 3000);
       return;
     }
 
     setState('field-notes');
-    let events;
-    try {
-      events = await adapter.events();
-    } catch {
-      setState('network-error');
-      setTimeout(() => onDone('other'), 3000);
-      return;
+    // Field notes are decoration on the relink path; the press code is the point.
+    // A relinking device with no readable history still gets its code.
+    let events: UsageEvent[] = [];
+    if (adapter) {
+      try {
+        events = await adapter.events();
+      } catch {
+        if (!relinking) {
+          setState('network-error');
+          setTimeout(() => onDone('other'), 3000);
+          return;
+        }
+      }
     }
     const ccAdapter = adapter instanceof ClaudeCodeAdapter ? adapter : null;
     const sessionStats = ccAdapter?.getSessionStats() ?? { prompts: 0, yoloPrompts: 0, toolCounts: {}, toolErrors: 0 };
 
-    if (events.length === 0) {
+    if (events.length === 0 && !relinking) {
       setState('no-data');
       setTimeout(() => onDone('other'), 3000);
       return;
@@ -182,13 +261,14 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
 
     const deviceId = existing?.deviceId ?? generateDeviceId();
     const calResult = calibrate(events);
-    saveCalibration({
-      cpLimit: calResult.cpLimit,
-      confidence: calResult.confidence,
-      calibratedAt: new Date().toISOString(),
-    });
-    const stats = computeWrapped(events, 'you', calResult.cpLimit);
-    setWrapped(stats);
+    if (events.length > 0) {
+      saveCalibration({
+        cpLimit: calResult.cpLimit,
+        confidence: calResult.confidence,
+        calibratedAt: new Date().toISOString(),
+      });
+      setWrapped(computeWrapped(events, 'you', calResult.cpLimit));
+    }
 
     setState('printing');
     await new Promise(r => setTimeout(r, 1200));
@@ -207,17 +287,33 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
     setCountdown(Math.floor((new Date(linkSession.expiresAt).getTime() - Date.now()) / 1000));
     setState('press-code');
 
-    const creds = await pollForLink(deviceId, linkSession.sessionId, () => {}, existing?.deviceToken);
+    // Short leash on a relink (T4/DD): a returning user is watching their own
+    // terminal. Ten minutes here is what made Ctrl-C the rational choice, and
+    // Ctrl-C skips offerAutoSync — reintroducing defect B2 for everyone sensible.
+    const creds = await pollForLink(
+      deviceId, linkSession.sessionId, () => {}, existing,
+      3000, relinking ? RELINK_POLL_MS : undefined,
+    );
     if (!creds) {
-      setState('expired');
-      setTimeout(() => onDone('other'), 3000);
+      // A relink gives up after RELINK_POLL_MS, but the code lives ~10 minutes
+      // server-side — saying "expired" would be a lie, and on a reauth the
+      // laptop does not need to witness the redemption anyway (no new token is
+      // issued; it keeps the one it has).
+      setState(relinking ? 'stopped-waiting' : 'expired');
+      // An already-linked device that ignored the code still resynced, and must
+      // still reach offerAutoSync — that is the population the hook exists for
+      // (defect B2). Letting the code expire is the normal outcome for someone
+      // who only wanted a refresh, so it cannot cost them the offer.
+      setTimeout(() => onDone(relinking ? 'resynced' : 'other'), 3000);
       return;
     }
 
     await saveCredentials(creds);
 
     const today = new Date().toLocaleDateString('en-CA');
-    await syncAfterLink(creds, events, calResult, today, sessionStats);
+    if (events.length > 0) {
+      await syncAfterLink(creds, events, calResult, today, sessionStats);
+    }
 
     setLinkedHandle(creds.handle);
     setLinkedDeviceId(creds.deviceId);
@@ -280,6 +376,14 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
         <>
           <BoxDivider />
           <BoxBlank />
+          {wasLinked && (
+            <>
+              {pre.decision.bannerLines.map((line, i) => (
+                <Text key={i}>{'  ' + (line ? chalk.hex(relinkColorFor(line, i))(line) : '')}</Text>
+              ))}
+              <BoxBlank />
+            </>
+          )}
           <PressCode code={pressCode} />
           <BoxBlank />
           <Text>
@@ -322,14 +426,12 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
       {state === 'resync' && (
         <>
           <Text>{'  ' + chalk.hex(FAINT)(spinnerFrame(tick) + '  re-syncing your latest usage…')}</Text>
-          <Text>{'  ' + chalk.hex(MUT).italic('— already linked. nothing else to do.')}</Text>
-        </>
-      )}
-
-      {state === 'already-linked' && (
-        <>
-          <Text>{'  ' + chalk.hex(STAMP).bold(`@${linkedHandle.toUpperCase()} already on record.`)}</Text>
-          <Text>{'  ' + chalk.hex(FAINT)(linkedDeviceId)}</Text>
+          {/* Report what actually happened. The Ink path used to say nothing at
+              all here while the plain path claimed "synced." — the drift that
+              made a shared decision function non-negotiable. */}
+          {pre.decision.resyncLine && (
+            <Text>{'  ' + chalk.hex(MUT).italic('— ' + pre.decision.resyncLine)}</Text>
+          )}
         </>
       )}
 
@@ -337,6 +439,13 @@ function InitApp({ onDone }: InitAppProps): React.ReactElement {
         <>
           <Text>{'  ' + chalk.hex(FLAME).bold('transmission failure.')}</Text>
           <Text>{'  ' + chalk.hex(FAINT)(error || 'check your connection and try again.')}</Text>
+        </>
+      )}
+
+      {state === 'stopped-waiting' && (
+        <>
+          <Text>{'  ' + chalk.hex(FAINT)('not waiting any longer — but your code is still good.')}</Text>
+          <Text>{'  ' + chalk.hex(MUT).italic('— enter it in the app; this laptop doesn’t need to be watching.')}</Text>
         </>
       )}
 
@@ -362,6 +471,38 @@ function humaneAutoSyncError(e: unknown): string {
   return 'auto-sync setup skipped - re-run cookd anytime to finish.';
 }
 
+/**
+ * Default NO (design delta DD5).
+ *
+ * `askYesNoDefaultYes` exists for the auto-sync offer, where a default-yes bias
+ * is right because the action is reversible (`cookd uninstall`). Reusing it for
+ * an irreversible one would make pressing Enter abandon an account. Separate
+ * helper, separate default, `[y/N]` in the prompt.
+ */
+async function askYesNoDefaultNo(): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await new Promise<string>(resolve => rl.question('', resolve));
+    return /^\s*y/i.test(answer);
+  } finally {
+    rl.close();
+  }
+}
+
+/** The revoked-token confirmation. Non-interactive NEVER auto-confirms. */
+export async function confirmStartOver(lines: string[]): Promise<boolean> {
+  const p = (s: string) => process.stdout.write(s + '\n');
+  p('');
+  lines.forEach((l, i) => p('  ' + chalk.hex(relinkColorFor(l, i))(l)));
+  if (!process.stdin.isTTY) {
+    p(chalk.hex(FAINT)('  run this in a terminal to continue.'));
+    return false;
+  }
+  p('');
+  p('  ' + chalk.hex(FLAME).bold('continue and start over?  [y/N]'));
+  return askYesNoDefaultNo();
+}
+
 async function askYesNoDefaultYes(): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -375,6 +516,12 @@ async function askYesNoDefaultYes(): Promise<boolean> {
 /** Offer to install auto-sync (consented). Shown after a first link, in both the Ink
  *  and plain flows. Non-interactive contexts never install. */
 export async function offerAutoSync(version: string, p: (s: string) => void): Promise<void> {
+  // Already wired? Then the user consented to this edit once already; asking
+  // again on every run reads as if something failed. An unparseable
+  // settings.json throws here — that must fall through to OFFERING, not crash.
+  try {
+    if (hasCookdHook(claudeSettingsPath())) return;
+  } catch { /* unreadable settings — offer anyway, installAutoSync reports properly */ }
   if (!process.stdin.isTTY) {
     p(chalk.hex(FAINT)('  auto-sync off — re-run cookd anytime to refresh.'));
     return;
@@ -396,42 +543,47 @@ export async function offerAutoSync(version: string, p: (s: string) => void): Pr
   }
 }
 
-async function runInitPlain(version: string): Promise<void> {
+async function runInitPlain(version: string, pre: Preflight): Promise<void> {
   const p = (msg: string) => process.stdout.write(msg + '\n');
 
   p('');
   p(chalk.bold('  cookd / field reporter'));
   p(chalk.hex(FAINT)('  reading your field notes…'));
 
-  const existing = await loadCredentials();
+  const existing = pre.creds;
+  const relinking = isAlreadyLinked(existing);
 
-  // Re-init guard: already-linked device re-syncs silently, no press code.
-  if (shouldSkipPressCode(existing)) {
+  // The re-sync already ran in preflight(); report its real result rather than
+  // asserting success. This path also used to `return` here, which meant the
+  // non-TTY flow never reached offerAutoSync either.
+  if (relinking && pre.decision.resyncLine) {
     p(chalk.hex(FAINT)('  re-syncing your latest usage…'));
-    try { await runSyncOnce(existing!); p(chalk.green.bold('  synced.')); }
-    catch { p(chalk.hex(FAINT)('  sync failed — try again in a moment.')); }
-    return;
+    p(chalk.hex(MUT)('  — ' + pre.decision.resyncLine));
   }
 
   const adapter = await detectAdapter();
-  if (!adapter) {
+  if (!adapter && !relinking) {
     p(chalk.hex(FAINT)('  no claude code session history found.'));
     p(chalk.hex(MUT)('  — start a session, then come back.'));
     return;
   }
 
-  let events: UsageEvent[];
-  try {
-    events = await adapter.events();
-  } catch {
-    p(chalk.hex(FLAME).bold('  transmission failure.'));
-    p(chalk.hex(FAINT)('  check your connection and try again.'));
-    return;
+  let events: UsageEvent[] = [];
+  if (adapter) {
+    try {
+      events = await adapter.events();
+    } catch {
+      if (!relinking) {
+        p(chalk.hex(FLAME).bold('  transmission failure.'));
+        p(chalk.hex(FAINT)('  check your connection and try again.'));
+        return;
+      }
+    }
   }
   const ccAdapter = adapter instanceof ClaudeCodeAdapter ? adapter : null;
   const sessionStats = ccAdapter?.getSessionStats() ?? { prompts: 0, yoloPrompts: 0, toolCounts: {}, toolErrors: 0 };
 
-  if (events.length === 0) {
+  if (events.length === 0 && !relinking) {
     p(chalk.hex(FAINT)('  no claude code session history found.'));
     p(chalk.hex(MUT)('  — start a session, then come back.'));
     return;
@@ -439,12 +591,12 @@ async function runInitPlain(version: string): Promise<void> {
 
   const deviceId = existing?.deviceId ?? generateDeviceId();
   const calResult = calibrate(events);
-  saveCalibration({ cpLimit: calResult.cpLimit, confidence: calResult.confidence, calibratedAt: new Date().toISOString() });
-
-  const stats = computeWrapped(events, 'you', calResult.cpLimit);
-  const ratio = stats.window.ratio;
-  p('');
-  p(chalk.bold(`  ${formatTokens(stats.window.weightedTokens)} tokens — ${Math.round(ratio * 100)}% of window`));
+  if (events.length > 0) {
+    saveCalibration({ cpLimit: calResult.cpLimit, confidence: calResult.confidence, calibratedAt: new Date().toISOString() });
+    const stats = computeWrapped(events, 'you', calResult.cpLimit);
+    p('');
+    p(chalk.bold(`  ${formatTokens(stats.window.weightedTokens)} tokens — ${Math.round(stats.window.ratio * 100)}% of window`));
+  }
   p(chalk.hex(FAINT)('  filing your notes with the press…'));
 
   let linkSession;
@@ -457,6 +609,11 @@ async function runInitPlain(version: string): Promise<void> {
   }
 
   p('');
+  if (relinking) {
+    pre.decision.bannerLines.forEach((line, i) =>
+      p('  ' + (line ? chalk.hex(relinkColorFor(line, i))(line) : '')));
+    p('');
+  }
   p(chalk.hex(STAMP).bold('  YOUR PRESS CODE'));
   p('');
   p('  ' + chalk.hex(FLAME).bold(linkSession.pressCode));
@@ -466,10 +623,30 @@ async function runInitPlain(version: string): Promise<void> {
   p('');
   p(chalk.hex(MUT)('  waiting for credentials to be presented…'));
 
-  const creds = await pollForLink(deviceId, linkSession.sessionId, () => {}, existing?.deviceToken);
+  // A piped / CI / hook-context relink must never block: nobody is there to
+  // redeem the code, and the caller is often waiting on our exit. Print it and
+  // go. A FRESH link still waits — that user genuinely needs time to install
+  // the app, and there is nothing useful to return to them without it.
+  if (relinking && !process.stdin.isTTY) {
+    p(chalk.hex(FAINT)('  (not a terminal — not waiting. run it again here when you’ve entered the code.)'));
+    return;
+  }
+
+  const creds = await pollForLink(
+    deviceId, linkSession.sessionId, () => {}, existing,
+    3000, relinking ? RELINK_POLL_MS : undefined,
+  );
   if (!creds) {
-    p(chalk.hex(FAINT)('  press code expired.'));
-    p(chalk.hex(MUT)("  — run cookd init again when you're ready."));
+    if (relinking) {
+      p(chalk.hex(FAINT)('  not waiting any longer — but your code is still good.'));
+      p(chalk.hex(MUT)('  — enter it in the app; this laptop doesn’t need to be watching.'));
+    } else {
+      p(chalk.hex(FAINT)('  press code expired.'));
+      p(chalk.hex(MUT)("  — run cookd init again when you're ready."));
+    }
+    // An expired code on a relink is the normal "I only wanted a refresh"
+    // outcome — it must not cost the machine the auto-sync offer (defect B2).
+    if (relinking) await offerAutoSync(version, p);
     return;
   }
 
@@ -480,19 +657,29 @@ async function runInitPlain(version: string): Promise<void> {
   p('');
 
   const today = new Date().toLocaleDateString('en-CA');
-  await syncAfterLink(creds, events, calResult, today, sessionStats);
+  if (events.length > 0) {
+    await syncAfterLink(creds, events, calResult, today, sessionStats);
+  }
 
   await offerAutoSync(version, p);
 }
 
 export async function runInit(version: string): Promise<void> {
+  // Runs before either renderer: the confirmation needs stdin, which Ink takes
+  // over once mounted. A declined confirm mints no code and touches nothing.
+  const pre = await preflight(confirmStartOver);
+  if (pre.aborted) {
+    process.stdout.write(chalk.hex(FAINT)('\n  nothing changed. your old account is untouched.\n\n'));
+    return;
+  }
+
   if (!process.stdout.isTTY) {
-    await runInitPlain(version);
+    await runInitPlain(version, pre);
     return;
   }
   try {
     const outcome = await new Promise<InitOutcome>(resolve => {
-      const { unmount } = render(<InitApp onDone={(o) => { unmount(); resolve(o); }} />);
+      const { unmount } = render(<InitApp pre={pre} onDone={(o) => { unmount(); resolve(o); }} />);
     });
     if (shouldOfferAutoSync(outcome)) {
       await offerAutoSync(version, (s) => process.stdout.write(s + '\n'));
@@ -500,7 +687,7 @@ export async function runInit(version: string): Promise<void> {
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === 'EIO' || code === 'EBUSY' || code === 'EPERM') {
-      await runInitPlain(version);
+      await runInitPlain(version, pre);
     } else {
       throw e;
     }
